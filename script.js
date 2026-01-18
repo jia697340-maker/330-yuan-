@@ -37171,7 +37171,8 @@ async function exportAppearanceSettings() {
     'open-nai-gallery-btn',
     'open-todo-list-btn',
     'open-quick-reply-btn',
-    'character-monitor-btn'
+    'character-monitor-btn',
+    'stop-api-call-btn'
   ];
 
 
