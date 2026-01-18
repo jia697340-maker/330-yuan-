@@ -36470,7 +36470,7 @@ async function exportAppearanceSettings() {
 
 
   let currentPage = 0;
-  const totalPages = 2;
+  const totalPages = 3;
 
 
   function setupHomeScreenPagination() {
