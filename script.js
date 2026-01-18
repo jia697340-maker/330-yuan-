@@ -3862,6 +3862,9 @@ function showToast(message, type = 'info', duration = 3000) {
       showCustomModal();
     });
   }
+  
+  // 暴露到全局作用域，供其他函数使用
+  window.showCustomAlert = showCustomAlert;
 
 
   async function copyTextToClipboard(textToCopy, successMessage = '内容已复制到剪贴板！') {
