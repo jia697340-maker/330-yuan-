@@ -250,7 +250,11 @@
       <div id="char-home-screen" class="char-screen active">
         <div style="height: 50px;"></div>
 
-        <div id="cphone-layout-container">
+        <div id="cphone-pages-container">
+          <div id="cphone-pages">
+            <!-- 第一页 -->
+            <div class="cphone-page">
+              <div id="cphone-layout-container">
             
             <div class="cphone-staggered-group">
                 <div class="cphone-bubble-pill top">
@@ -327,6 +331,28 @@
                 </div>
             </div>
 
+            </div>
+            <!-- 第一页结束 -->
+
+            <!-- 第二页 -->
+            <div class="cphone-page">
+              <div id="cphone-page2-container">
+                <div class="cphone-page2-app-grid">
+                  <div class="app-icon small" onclick="openCharApp('settings')">
+                    <div class="icon-bg"><img id="cphone-icon-img-settings" src="https://i.postimg.cc/MK8rJ8t7/IMG-6438.jpg" alt="设置"></div>
+                    <span class="label">设置</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <!-- 第二页结束 -->
+          </div>
+        </div>
+
+        <!-- 分页指示器 -->
+        <div id="cphone-pagination">
+          <div class="cphone-pagination-dot active"></div>
+          <div class="cphone-pagination-dot"></div>
         </div>
 
         <div class="cphone-dock-container">
@@ -1129,7 +1155,7 @@
         </div>
 
         <!-- 系统级通知 -->
-        <div class="settings-header">系统级通知 <span style="font-size: 12px; color: #999; margin-left: 10px;">v0.0.2</span></div>
+        <div class="settings-header">系统级通知 <span style="font-size: 12px; color: #999; margin-left: 10px;">v0.0.3</span></div>
         <div class="settings-section">
             <!-- 1. 主开关 -->
             <div class="settings-item">
@@ -1655,12 +1681,6 @@
               <path d="M16 5.02c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
               <path d="M14.5 11.02c0 .83-.67 1.5-1.5 1.5v0c-.83 0-1.5-.67-1.5-1.5v-5c0-.83.67-1.5 1.5-1.5v0c.83 0 1.5.67 1.5 1.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
               <path d="M8 11.02c0 .83-.67 1.5-1.5 1.5v0c-.83 0-1.5-.67-1.5-1.5v-5c0-.83.67-1.5 1.5-1.5v0c.83 0 1.5.67 1.5 1.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
-            </svg> </button> <button id="character-monitor-btn" class="chat-action-icon-btn action-button" title="角色监测"> <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <rect x="3" y="4" width="18" height="18" rx="2" stroke="currentColor" stroke-width="2"/>
-              <line x1="3" y1="9" x2="21" y2="9" stroke="currentColor" stroke-width="2"/>
-              <line x1="8" y1="4" x2="8" y2="9" stroke="currentColor" stroke-width="2"/>
-              <line x1="16" y1="4" x2="16" y2="9" stroke="currentColor" stroke-width="2"/>
-              <path d="M5.5 14.52l-1.92-1.92c-.34-.34-.34-.89 0-1.23l3.58-3.58c.34-.34.89-.34 1.23 0l1.92 1.92c.34.34.34.89 0 1.23l-3.58 3.58c-.34.34-.89.34-1.23 0Z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
             </svg> </button> <button id="edit-last-response-btn" class="chat-action-icon-btn action-button" title="导演模式：编辑AI上一轮的完整响应"> <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" stroke="currentColor" stroke-width="2" stroke-linecap="round"
               stroke-linejoin="round">
               <path d="M12 20h9"></path>
@@ -1699,7 +1719,17 @@
         <path d="M9 11l3 3L22 4"></path>
         <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path>
     </svg>
-</button>
+</button> <button id="stop-api-call-btn" class="chat-action-icon-btn action-button" title="暂停调用" style="display: none;"> <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="10"></circle>
+              <rect x="9" y="8" width="2" height="8" rx="1" fill="currentColor"></rect>
+              <rect x="13" y="8" width="2" height="8" rx="1" fill="currentColor"></rect>
+            </svg> </button> <button id="character-monitor-btn" class="chat-action-icon-btn action-button" title="角色监测"> <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <rect x="3" y="4" width="18" height="18" rx="2" stroke="currentColor" stroke-width="2"/>
+              <line x1="3" y1="9" x2="21" y2="9" stroke="currentColor" stroke-width="2"/>
+              <line x1="8" y1="4" x2="8" y2="9" stroke="currentColor" stroke-width="2"/>
+              <line x1="16" y1="4" x2="16" y2="9" stroke="currentColor" stroke-width="2"/>
+              <path d="M5.5 14.52l-1.92-1.92c-.34-.34-.34-.89 0-1.23l3.58-3.58c.34-.34.89-.34 1.23 0l1.92 1.92c.34.34.34.89 0 1.23l-3.58 3.58c-.34.34-.89.34-1.23 0Z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+            </svg> </button>
 </div>
         <div id="chat-input-main-row"> <button id="chat-expand-btn" class="chat-action-icon-btn action-button" title="展开功能">+</button><textarea id="chat-input" rows="1" placeholder="输入消息..."></textarea>
           <div id="input-actions-wrapper"> <button id="wait-reply-btn" title="等待回复"><img src="https://i.postimg.cc/q72zq80N/ECE92-BBC-BE57-48-E9-BB2-C-345-B6019-C4-B2.png" alt="等待回复"></button> <button id="send-btn" class="action-button">发送</button> </div>
@@ -2506,6 +2536,13 @@
                  <div class="settings-right">
                     <input type="number" id="auto-memory-interval" class="settings-num-input">
                  </div>
+            </div>
+            
+            <!-- 手动总结按钮 -->
+            <div class="settings-item">
+                 <button id="manual-summary-btn" style="width: 100%; padding: 10px; background: var(--accent-color); color: white; border: none; border-radius: 8px; font-size: 14px; cursor: pointer;">
+                    手动总结
+                 </button>
             </div>
 
             <!-- 挂载聊天 -->
@@ -3533,6 +3570,41 @@
       <div class="custom-modal-footer"> <button id="custom-modal-cancel"data-lang-key="cancel">取消</button> <button id="custom-modal-confirm" class="confirm-btn"data-lang-key="confirm">确定</button> </div>
     </div>
   </div>
+  
+  <!-- 手动总结弹窗 -->
+  <div id="manual-summary-modal" class="modal" style="display: none;">
+    <div class="modal-content" style="max-width: 400px; width: 90%;">
+      <div class="modal-header">
+        <span>手动总结长期记忆</span>
+        <span class="close-btn" id="manual-summary-close-btn" style="cursor: pointer; font-size: 24px;">&times;</span>
+      </div>
+      <div class="modal-body" style="padding: 20px;">
+        <div class="form-group" style="margin-bottom: 15px;">
+          <label style="display: block; margin-bottom: 8px; color: #333;">选择消息范围</label>
+          <div style="display: flex; gap: 10px; align-items: center;">
+            <div style="flex: 1;">
+              <label style="font-size: 12px; color: #666;">从第</label>
+              <input type="number" id="manual-summary-start" min="1" value="1" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; margin-top: 4px;">
+            </div>
+            <span style="color: #666;">到</span>
+            <div style="flex: 1;">
+              <label style="font-size: 12px; color: #666;">第</label>
+              <input type="number" id="manual-summary-end" min="1" value="20" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; margin-top: 4px;">
+            </div>
+            <span style="color: #666;">条</span>
+          </div>
+          <div style="margin-top: 8px; font-size: 12px; color: #999;">
+            当前聊天共有 <span id="manual-summary-total-count">0</span> 条消息
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer" style="padding: 15px; display: flex; gap: 10px; justify-content: flex-end;">
+        <button id="manual-summary-cancel-btn" style="padding: 8px 20px; border: 1px solid #ddd; background: white; border-radius: 4px; cursor: pointer;">取消</button>
+        <button id="manual-summary-confirm-btn" style="padding: 8px 20px; border: none; background: var(--accent-color); color: white; border-radius: 4px; cursor: pointer;">开始总结</button>
+      </div>
+    </div>
+  </div>
+  
   <div id="preset-actions-modal" class="modal">
     <div id="custom-modal" style="width: 250px;">
       <div class="custom-modal-footer"> <button id="preset-action-edit" data-lang-key="edit">编辑预设</button> <button id="preset-action-delete" class="btn-danger">删除预设</button> <button id="preset-action-cancel" style="margin-top: 8px; border-radius: 8px; background-color: #f0f0f0;"data-lang-key="cancel">取消</button> </div>

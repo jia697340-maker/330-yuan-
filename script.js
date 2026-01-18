@@ -64,6 +64,8 @@ function getDeviceId() {
 const EPHONE_DEVICE_ID = getDeviceId();
 console.log(`EPhone 设备ID: ${EPHONE_DEVICE_ID}`);
 
+// 全局 API 调用控制器
+let currentApiController = null;
 
 let isPinActivated = localStorage.getItem('ephonePinActivated') === 'true';
 
@@ -957,6 +959,31 @@ document.getElementById('char-city-search-btn').addEventListener('click', async 
         alert("未找到该城市，请尝试使用拼音或英文 (如 New York)。");
     }
 });
+
+  // 手动总结弹窗事件监听器
+  document.getElementById('manual-summary-btn').addEventListener('click', openManualSummaryModal);
+  document.getElementById('manual-summary-close-btn').addEventListener('click', closeManualSummaryModal);
+  document.getElementById('manual-summary-cancel-btn').addEventListener('click', closeManualSummaryModal);
+  document.getElementById('manual-summary-confirm-btn').addEventListener('click', executeManualSummary);
+  
+  // 暂停调用按钮事件监听器
+  const stopApiCallBtn = document.getElementById('stop-api-call-btn');
+  if (stopApiCallBtn) {
+    stopApiCallBtn.addEventListener('click', () => {
+      if (currentApiController) {
+        console.log('用户点击暂停调用按钮，正在取消API请求...');
+        currentApiController.abort();
+        
+        // 立即隐藏按钮并移除动画
+        stopApiCallBtn.style.display = 'none';
+        stopApiCallBtn.classList.remove('active');
+        
+        // 显示取消提示
+        showCustomAlert('已暂停', 'API调用已被取消');
+      }
+    });
+  }
+  
   const PREFILLED_SALT = "bu_wan_jiu_guan_bu_yao_huo_qu";
 
 
@@ -12846,10 +12873,23 @@ ${chat.settings.myAvatarLibrary && chat.settings.myAvatarLibrary.length > 0 ? ch
       let isGemini = proxyUrl === GEMINI_API_URL;
       let geminiConfig = toGeminiRequestData(model, apiKey, systemPrompt, messagesPayload)
 
+      // 创建新的 AbortController
+      currentApiController = new AbortController();
+      
+      // 显示暂停调用按钮
+      const stopBtn = document.getElementById('stop-api-call-btn');
+      if (stopBtn) {
+        stopBtn.style.display = 'flex';
+        stopBtn.classList.add('active');
+      }
+
       let response;
       try {
         response = isGemini ?
-          await fetch(geminiConfig.url, geminiConfig.data) :
+          await fetch(geminiConfig.url, {
+            ...geminiConfig.data,
+            signal: currentApiController.signal
+          }) :
           await fetch(`${proxyUrl}/v1/chat/completions`, {
             method: 'POST',
             headers: {
@@ -12864,10 +12904,37 @@ ${chat.settings.myAvatarLibrary && chat.settings.myAvatarLibrary.length > 0 ? ch
               }, ...messagesPayload],
               temperature: state.globalSettings.apiTemperature || 0.8,
               stream: false
-            })
+            }),
+            signal: currentApiController.signal
           });
       } catch (networkError) {
+        // 隐藏暂停调用按钮
+        if (stopBtn) {
+          stopBtn.style.display = 'none';
+          stopBtn.classList.remove('active');
+        }
+        
+        // 检查是否是用户主动取消
+        if (networkError.name === 'AbortError') {
+          console.log('API调用已被用户取消');
+          const cancelMessage = {
+            role: 'system',
+            content: '已取消API调用',
+            timestamp: Date.now(),
+            isHidden: true
+          };
+          chat.history.push(cancelMessage);
+          await db.chats.put(chat);
+          return;
+        }
         throw new Error(`网络请求失败: ${networkError.message}`);
+      } finally {
+        // 清理 controller 和隐藏按钮
+        currentApiController = null;
+        if (stopBtn) {
+          stopBtn.style.display = 'none';
+          stopBtn.classList.remove('active');
+        }
       }
 
       if (!response.ok) {
@@ -20809,9 +20876,16 @@ ${linkedContents}
 
     if (suffix === null) return;
 
-
-
-    const myNickname = getDisplayNameInGroup(chat, state.qzoneSettings.nickname);
+    // 获取用户昵称，如果是 {{user}} 则使用 "你"
+    let myNickname = state.qzoneSettings.nickname;
+    if (!myNickname || myNickname === '{{user}}') {
+      myNickname = '你';
+    }
+    
+    // 如果是群聊，使用群昵称
+    if (chat.isGroup) {
+      myNickname = chat.settings.myNickname || '你';
+    }
 
 
 
@@ -23065,6 +23139,68 @@ function loadMoreMemories() {
       await triggerAutoSummary(state.activeChatId, true);
     }
   }
+  
+  // 新增：打开手动总结弹窗
+  function openManualSummaryModal() {
+    const chat = state.chats[state.activeChatId];
+    if (!chat) return;
+    
+    const modal = document.getElementById('manual-summary-modal');
+    const totalCount = document.getElementById('manual-summary-total-count');
+    const startInput = document.getElementById('manual-summary-start');
+    const endInput = document.getElementById('manual-summary-end');
+    
+    // 计算可用消息总数（排除隐藏消息）
+    const availableMessages = chat.history.filter(m => !m.isHidden || (m.role === 'system' && m.content.includes('内心独白')));
+    const totalMessages = availableMessages.length;
+    
+    totalCount.textContent = totalMessages;
+    startInput.max = totalMessages;
+    endInput.max = totalMessages;
+    endInput.value = Math.min(20, totalMessages);
+    
+    modal.style.display = 'flex';
+  }
+  
+  // 新增：关闭手动总结弹窗
+  function closeManualSummaryModal() {
+    const modal = document.getElementById('manual-summary-modal');
+    modal.style.display = 'none';
+  }
+  
+  // 新增：执行手动总结
+  async function executeManualSummary() {
+    const startInput = document.getElementById('manual-summary-start');
+    const endInput = document.getElementById('manual-summary-end');
+    
+    const start = parseInt(startInput.value);
+    const end = parseInt(endInput.value);
+    
+    if (isNaN(start) || isNaN(end) || start < 1 || end < start) {
+      await showCustomAlert('输入错误', '请输入有效的消息范围（起始位置必须小于等于结束位置）');
+      return;
+    }
+    
+    const chat = state.chats[state.activeChatId];
+    const availableMessages = chat.history.filter(m => !m.isHidden || (m.role === 'system' && m.content.includes('内心独白')));
+    
+    if (end > availableMessages.length) {
+      await showCustomAlert('范围超出', `结束位置不能超过总消息数（${availableMessages.length}）`);
+      return;
+    }
+    
+    if (end - start + 1 < 5) {
+      await showCustomAlert('消息太少', '选择的消息数量太少（至少需要5条），无法进行有意义的总结');
+      return;
+    }
+    
+    closeManualSummaryModal();
+    
+    const confirmed = await showCustomConfirm('确认操作', `将总结第 ${start} 到第 ${end} 条消息（共 ${end - start + 1} 条），会消耗API额度。确定要继续吗？`);
+    if (confirmed) {
+      await triggerAutoSummary(state.activeChatId, false, { start, end });
+    }
+  }
 
   
   async function checkAndTriggerAutoSummary(chatId) {
@@ -23713,14 +23849,25 @@ ${memoryContent}
   }
 
 
-  async function triggerAutoSummary(chatId, force = false) {
+  async function triggerAutoSummary(chatId, force = false, customRange = null) {
     const chat = state.chats[chatId];
     if (!chat) return;
 
     const lastSummaryTimestamp = chat.lastMemorySummaryTimestamp || 0;
-    const messagesToSummarize = force ?
-      chat.history.filter(m => !m.isHidden || (m.role === 'system' && m.content.includes('内心独白'))).slice(-(chat.settings.autoMemoryInterval || 20)) :
-      chat.history.filter(m => m.timestamp > lastSummaryTimestamp && (!m.isHidden || (m.role === 'system' && m.content.includes('内心独白'))));
+    let messagesToSummarize;
+    
+    if (customRange) {
+      // 手动总结：使用自定义范围
+      const allMessages = chat.history.filter(m => !m.isHidden || (m.role === 'system' && m.content.includes('内心独白')));
+      const startIndex = Math.max(0, customRange.start - 1);
+      const endIndex = Math.min(allMessages.length, customRange.end);
+      messagesToSummarize = allMessages.slice(startIndex, endIndex);
+    } else {
+      // 原有逻辑
+      messagesToSummarize = force ?
+        chat.history.filter(m => !m.isHidden || (m.role === 'system' && m.content.includes('内心独白'))).slice(-(chat.settings.autoMemoryInterval || 20)) :
+        chat.history.filter(m => m.timestamp > lastSummaryTimestamp && (!m.isHidden || (m.role === 'system' && m.content.includes('内心独白'))));
+    }
 
     if (messagesToSummarize.length < 5) {
       if (force) alert("最近的消息太少，无法进行有意义的总结。");
@@ -37023,7 +37170,8 @@ async function exportAppearanceSettings() {
     'read-together-btn',
     'open-nai-gallery-btn',
     'open-todo-list-btn',
-    'open-quick-reply-btn'
+    'open-quick-reply-btn',
+    'character-monitor-btn'
   ];
 
 
@@ -55179,6 +55327,87 @@ if (isGroup) {
 
 
     setupHomeScreenPagination();
+
+    // Cphone 翻页功能
+    function setupCphonePagination() {
+      const pagesContainer = document.getElementById('cphone-pages-container');
+      const pages = document.getElementById('cphone-pages');
+      const dots = document.querySelectorAll('.cphone-pagination-dot');
+      
+      if (!pagesContainer || !pages || dots.length === 0) return;
+      
+      let currentCphonePage = 0;
+      const totalCphonePages = 2;
+      let startX = 0, startY = 0;
+      let currentX = 0;
+      let isDragging = false;
+      let isClick = true;
+
+      const updatePagination = () => {
+        pages.style.transform = `translateX(-${currentCphonePage * (100 / totalCphonePages)}%)`;
+        dots.forEach((dot, index) => {
+          dot.classList.toggle('active', index === currentCphonePage);
+        });
+      };
+
+      const onDragStart = (e) => {
+        isDragging = true;
+        isClick = true;
+        startX = e.type.includes('mouse') ? e.pageX : e.touches[0].pageX;
+        startY = e.type.includes('mouse') ? e.pageY : e.touches[0].pageY;
+        pages.style.transition = 'none';
+      };
+
+      const onDragMove = (e) => {
+        if (!isDragging) return;
+
+        const currentY = e.type.includes('mouse') ? e.pageY : e.touches[0].pageY;
+        currentX = e.type.includes('mouse') ? e.pageX : e.touches[0].pageX;
+        const diffX = currentX - startX;
+        const diffY = currentY - startY;
+
+        if (isClick && (Math.abs(diffX) > 10 || Math.abs(diffY) > 10)) {
+          isClick = false;
+        }
+
+        if (Math.abs(diffX) > Math.abs(diffY)) {
+          if (e.cancelable) e.preventDefault();
+          pages.style.transform = `translateX(calc(-${currentCphonePage * (100 / totalCphonePages)}% + ${diffX}px))`;
+        }
+      };
+
+      const onDragEnd = (e) => {
+        if (!isDragging) return;
+        isDragging = false;
+        pages.style.transition = 'transform 0.4s cubic-bezier(0.4, 0, 0.2, 1)';
+
+        if (isClick) {
+          updatePagination();
+          return;
+        }
+
+        const diffX = currentX - startX;
+        if (Math.abs(diffX) > pagesContainer.offsetWidth / 4) {
+          if (diffX > 0 && currentCphonePage > 0) {
+            currentCphonePage--;
+          } else if (diffX < 0 && currentCphonePage < totalCphonePages - 1) {
+            currentCphonePage++;
+          }
+        }
+        updatePagination();
+      };
+
+      pagesContainer.addEventListener('mousedown', onDragStart);
+      pagesContainer.addEventListener('mousemove', onDragMove);
+      pagesContainer.addEventListener('mouseup', onDragEnd);
+      pagesContainer.addEventListener('mouseleave', onDragEnd);
+
+      pagesContainer.addEventListener('touchstart', onDragStart, { passive: false });
+      pagesContainer.addEventListener('touchmove', onDragMove, { passive: false });
+      pagesContainer.addEventListener('touchend', onDragEnd);
+    }
+
+    setupCphonePagination();
 
 
     window.openPresetScreen = openPresetScreen;
