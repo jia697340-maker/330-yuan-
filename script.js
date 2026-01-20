@@ -37505,7 +37505,7 @@ async function exportAppearanceSettings() {
 
       const currentY = e.type.includes('mouse') ? e.pageY : e.touches[0].pageY;
       currentX = e.type.includes('mouse') ? e.pageX : e.touches[0].pageX;
-      const diffX = currentX - startX;
+      let diffX = currentX - startX;
       const diffY = currentY - startY;
 
 
@@ -37516,6 +37516,24 @@ async function exportAppearanceSettings() {
 
       if (Math.abs(diffX) > Math.abs(diffY)) {
         if (e.cancelable) e.preventDefault();
+        
+        // 限制滑动距离，确保不会一次滑动超过一页
+        const maxSwipeDistance = pagesContainer.offsetWidth * 0.8;
+        
+        // 限制向左滑动（下一页）
+        if (diffX < 0 && currentPage >= totalPages - 1) {
+          diffX = Math.max(diffX, -maxSwipeDistance * 0.3); // 最后一页时限制滑动
+        } else if (diffX < 0) {
+          diffX = Math.max(diffX, -maxSwipeDistance); // 限制最大向左滑动距离
+        }
+        
+        // 限制向右滑动（上一页）
+        if (diffX > 0 && currentPage <= 0) {
+          diffX = Math.min(diffX, maxSwipeDistance * 0.3); // 第一页时限制滑动
+        } else if (diffX > 0) {
+          diffX = Math.min(diffX, maxSwipeDistance); // 限制最大向右滑动距离
+        }
+        
         pages.style.transform = `translateX(calc(-${currentPage * (100 / totalPages)}% + ${diffX}px))`;
       }
     };
@@ -37534,10 +37552,15 @@ async function exportAppearanceSettings() {
 
 
       const diffX = currentX - startX;
-      if (Math.abs(diffX) > pagesContainer.offsetWidth / 4) {
+      const swipeThreshold = pagesContainer.offsetWidth / 3; // 提高阈值到1/3，确保翻页更明确
+      
+      // 只允许一次翻一页
+      if (Math.abs(diffX) > swipeThreshold) {
         if (diffX > 0 && currentPage > 0) {
+          // 向右滑动，返回上一页
           currentPage--;
         } else if (diffX < 0 && currentPage < totalPages - 1) {
+          // 向左滑动，前往下一页
           currentPage++;
         }
       }
