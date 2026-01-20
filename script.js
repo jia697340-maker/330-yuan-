@@ -1,4 +1,4 @@
-﻿const ACTIVATION_PIN_URL = 'https://gist.githubusercontent.com/cx3300-1/f04ec50b5e8f2d88365d17ff35efffcf/raw/cd28d8825c5c34ea10bda8a4518a1a6a1f5a7d13/pin.txt';
+const ACTIVATION_PIN_URL = 'https://gist.githubusercontent.com/cx3300-1/f04ec50b5e8f2d88365d17ff35efffcf/raw/cd28d8825c5c34ea10bda8a4518a1a6a1f5a7d13/pin.txt';
 
 function escapeHTML(str) {
   if (!str) return '';
@@ -2321,499 +2321,6 @@ document.getElementById('char-city-search-btn').addEventListener('click', async 
     ttsCache: new Map(),
     quickReplies: []
   };
-
-// ==================== 角色监测功能 ====================
-
-// 初始化监测配置
-if (!state.globalSettings) {
-  state.globalSettings = {};
-}
-if (!state.globalSettings.characterMonitor) {
-  state.globalSettings.characterMonitor = {
-    timeSegments: 12,
-    hoursPerSegment: 2,
-    historyDays: 7,
-    autoGenerate: false
-  };
-}
-
-// 当前监测数据
-let currentMonitorData = null;
-let currentMonitorDate = null;
-
-// 打开角色监测界面
-async function openCharacterMonitor() {
-  // 强制弹窗提示功能已锁定
-  await showCustomAlert('功能暂时锁定', '角色监测功能存在较多bug，正在修复中。\n\n为了保证您的使用体验，该功能暂时锁定，修复完成后将重新开放。\n\n感谢您的理解与支持！');
-  return;
-  
-  // 以下代码暂时禁用
-  /*
-  if (!state.activeChatId) {
-    await showCustomAlert('提示', '请先选择一个聊天对象');
-    return;
-  }
-  
-  const chat = state.chats[state.activeChatId];
-  if (!chat) return;
-  
-  document.getElementById('monitor-character-name').textContent = `${chat.name} - 角色监测`;
-  
-  const today = new Date();
-  currentMonitorDate = today;
-  updateMonitorDateDisplay(today);
-  
-  const todayStr = formatMonitorDate(today);
-  const existingData = await loadMonitorData(state.activeChatId, todayStr);
-  
-  // 先显示界面
-  showScreen('character-monitor-screen');
-  
-  if (existingData) {
-    currentMonitorData = existingData;
-    renderMonitorTimeline(existingData);
-  } else {
-    // 先渲染空白时间轴
-    renderEmptyTimeline();
-    
-    // 然后再询问是否生成
-    const hour = today.getHours();
-    let shouldGenerate = false;
-    let generateMode = 'full';
-    let targetDate = todayStr;
-    let displayDate = today;
-    
-    if (hour >= 22) {
-      shouldGenerate = await showCustomConfirm('生成监测', '是否立即生成今日完整监测？');
-      generateMode = 'full';
-    } else if (hour >= 6) {
-      shouldGenerate = await showCustomConfirm('生成监测', '是否立即生成今日已过去的时段？');
-      generateMode = 'past';
-    } else {
-      const yesterday = new Date(today);
-      yesterday.setDate(yesterday.getDate() - 1);
-      const yesterdayStr = formatMonitorDate(yesterday);
-      shouldGenerate = await showCustomConfirm('生成监测', '是否立即生成昨日完整监测？');
-      if (shouldGenerate) {
-        targetDate = yesterdayStr;
-        displayDate = yesterday;
-        currentMonitorDate = yesterday;
-        updateMonitorDateDisplay(yesterday);
-        generateMode = 'full';
-      }
-    }
-    
-    if (shouldGenerate) {
-      try {
-        await generateMonitorData(state.activeChatId, targetDate, generateMode);
-        // generateMonitorData 内部已经有成功提示
-      } catch (error) {
-        console.error('生成监测数据失败:', error);
-        await showCustomAlert('错误', '生成失败，请重试');
-        renderEmptyTimeline();
-      }
-    }
-  }
-  */
-}
-
-// 生成监测数据
-async function generateMonitorData(characterId, date, mode = 'full') {
-  const chat = state.chats[characterId];
-  if (!chat) return;
-  
-  // 确保配置已初始化
-  if (!state.globalSettings) {
-    state.globalSettings = {};
-  }
-  if (!state.globalSettings.characterMonitor) {
-    state.globalSettings.characterMonitor = {
-      timeSegments: 12,
-      hoursPerSegment: 2,
-      historyDays: 7,
-      autoGenerate: false
-    };
-  }
-  
-  const config = state.globalSettings.characterMonitor;
-  const segments = config.timeSegments;
-  const hoursPerSegment = config.hoursPerSegment;
-  
-  let segmentsToGenerate = [];
-  const now = new Date();
-  const targetDate = new Date(date);
-  const isToday = formatMonitorDate(now) === date;
-  
-  for (let i = 0; i < segments; i++) {
-    const startHour = i * hoursPerSegment;
-    const endHour = (i + 1) * hoursPerSegment;
-    const timeRange = `${String(startHour).padStart(2, '0')}:00-${String(endHour).padStart(2, '0')}:00`;
-    
-    if (mode === 'full') {
-      segmentsToGenerate.push({ index: i, timeRange, startHour, endHour });
-    } else if (mode === 'past' && isToday) {
-      if (endHour <= now.getHours()) {
-        segmentsToGenerate.push({ index: i, timeRange, startHour, endHour });
-      }
-    }
-  }
-  
-  if (segmentsToGenerate.length === 0) {
-    await showCustomAlert('提示', '没有需要生成的时段');
-    return;
-  }
-  
-  const timeline = [];
-  
-  for (const segment of segmentsToGenerate) {
-    try {
-      const content = await generateSegmentContent(chat, date, segment);
-      timeline.push({
-        timeRange: segment.timeRange,
-        action: content.action,
-        mood: content.mood,
-        innerThought: content.innerThought,
-        isEdited: false,
-        editTime: null,
-        isHighlighted: false
-      });
-    } catch (error) {
-      console.error(`生成时段 ${segment.timeRange} 失败:`, error);
-      timeline.push({
-        timeRange: segment.timeRange,
-        action: '生成失败，请重试',
-        mood: '未知',
-        innerThought: '...',
-        isEdited: false,
-        editTime: null,
-        isHighlighted: false
-      });
-    }
-  }
-  
-  const monitorData = {
-    characterId: characterId,
-    characterName: chat.name,
-    date: date,
-    timeline: timeline,
-    generatedAt: new Date().toISOString()
-  };
-  
-  await saveMonitorData(monitorData);
-  currentMonitorData = monitorData;
-  renderMonitorTimeline(monitorData);
-  
-  await showCustomAlert('完成', '监测数据生成完成！');
-}
-
-// 生成单个时段的内容
-async function generateSegmentContent(chat, date, segment) {
-  const prompt = `根据以下信息，生成 ${chat.name} 在 ${date} ${segment.timeRange} 这个时段的行动监测。
-
-【角色人设】
-${chat.settings?.persona || '无'}
-
-【近期对话】
-${await getRecentMessagesForMonitor(chat.id, 10)}
-
-【要求】
-1. 用第三人称描述 ${chat.name} 的具体行动
-2. 不要使用任何表情符号
-3. 描述要具体生动
-4. 格式：
-   行动：[具体描述，50-100字]
-   心情：[2-4字的词汇]
-   内心想法：[口语化表达，10-20字]
-
-请直接输出，不要有任何额外说明。`;
-
-  const apiConfig = state.apiConfig;
-  const response = await fetch(`${apiConfig.proxyUrl}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiConfig.apiKey}`
-    },
-    body: JSON.stringify({
-      model: apiConfig.model,
-      messages: [
-        { role: 'system', content: '你是一个专业的角色行为分析师，擅长根据角色设定推测其日常行为。' },
-        { role: 'user', content: prompt }
-      ],
-      temperature: 0.8
-    })
-  });
-  
-  const data = await response.json();
-  const text = getGeminiResponseText(data);
-  
-  return parseSegmentResponse(text);
-}
-
-// 解析API返回的内容
-function parseSegmentResponse(text) {
-  const lines = text.split('\n').filter(l => l.trim());
-  
-  let action = '';
-  let mood = '';
-  let innerThought = '';
-  
-  for (const line of lines) {
-    if (line.includes('行动：') || line.includes('行动:')) {
-      action = line.split(/[：:]/)[1]?.trim() || '';
-    } else if (line.includes('心情：') || line.includes('心情:')) {
-      mood = line.split(/[：:]/)[1]?.trim() || '';
-    } else if (line.includes('内心想法：') || line.includes('内心想法:')) {
-      innerThought = line.split(/[：:]/)[1]?.trim() || '';
-    }
-  }
-  
-  if (!action && !mood && !innerThought) {
-    const parts = text.split(/心情[：:]|内心想法[：:]/);
-    action = parts[0]?.replace(/行动[：:]/, '').trim() || text;
-    mood = parts[1]?.trim() || '平静';
-    innerThought = parts[2]?.trim() || '...';
-  }
-  
-  return { action, mood, innerThought };
-}
-
-// 渲染时间轴
-function renderMonitorTimeline(monitorData) {
-  const container = document.getElementById('monitor-timeline-container');
-  container.innerHTML = '';
-  
-  // 确保配置已初始化
-  if (!state.globalSettings) {
-    state.globalSettings = {};
-  }
-  if (!state.globalSettings.characterMonitor) {
-    state.globalSettings.characterMonitor = {
-      timeSegments: 12,
-      hoursPerSegment: 2,
-      historyDays: 7,
-      autoGenerate: false
-    };
-  }
-  
-  const config = state.globalSettings.characterMonitor;
-  const totalSegments = config.timeSegments;
-  
-  const allSegments = [];
-  for (let i = 0; i < totalSegments; i++) {
-    const startHour = i * config.hoursPerSegment;
-    const endHour = (i + 1) * config.hoursPerSegment;
-    const timeRange = `${String(startHour).padStart(2, '0')}:00-${String(endHour).padStart(2, '0')}:00`;
-    
-    const existingSegment = monitorData.timeline.find(s => s.timeRange === timeRange);
-    allSegments.push(existingSegment || { timeRange, isEmpty: true });
-  }
-  
-  allSegments.forEach((segment, index) => {
-    const card = document.createElement('div');
-    
-    if (segment.isEmpty) {
-      card.className = 'monitor-empty-slot';
-      card.innerHTML = `
-        <div style="font-size: 14px; font-weight: 600; margin-bottom: 5px;">${segment.timeRange}</div>
-        <div>暂无数据</div>
-      `;
-    } else {
-      card.className = 'monitor-time-card';
-      if (segment.isHighlighted) card.classList.add('highlighted');
-      if (segment.isEdited) card.classList.add('edited');
-      
-      card.innerHTML = `
-        <div class="monitor-time-range">${segment.timeRange}</div>
-        <div class="monitor-action">${escapeHTML(segment.action)}</div>
-        <div class="monitor-mood"><strong>心情：</strong>${escapeHTML(segment.mood)}</div>
-        <div class="monitor-inner-thought"><strong>内心想法：</strong>${escapeHTML(segment.innerThought)}</div>
-        <div class="monitor-time-card-actions">
-          <span onclick="editMonitorSegment('${segment.timeRange}')">编辑</span>
-          <span onclick="toggleMonitorHighlight('${segment.timeRange}')">${segment.isHighlighted ? '取消高亮' : '高亮'}</span>
-          <span onclick="regenerateMonitorSegment('${segment.timeRange}')">重新生成</span>
-        </div>
-      `;
-    }
-    
-    container.appendChild(card);
-  });
-}
-
-// 渲染空时间轴
-function renderEmptyTimeline() {
-  const container = document.getElementById('monitor-timeline-container');
-  container.innerHTML = '';
-  
-  const config = state.globalSettings.characterMonitor;
-  const totalSegments = config.timeSegments;
-  
-  for (let i = 0; i < totalSegments; i++) {
-    const startHour = i * config.hoursPerSegment;
-    const endHour = (i + 1) * config.hoursPerSegment;
-    const timeRange = `${String(startHour).padStart(2, '0')}:00-${String(endHour).padStart(2, '0')}:00`;
-    
-    const card = document.createElement('div');
-    card.className = 'monitor-empty-slot';
-    card.innerHTML = `
-      <div style="font-size: 14px; font-weight: 600; margin-bottom: 5px;">${timeRange}</div>
-      <div>暂无数据</div>
-    `;
-    container.appendChild(card);
-  }
-}
-
-// 编辑时段 - 暴露到全局作用域
-window.editMonitorSegment = async function(timeRange) {
-  if (!currentMonitorData) return;
-  
-  const segment = currentMonitorData.timeline.find(s => s.timeRange === timeRange);
-  if (!segment) return;
-  
-  const newAction = prompt('编辑行动描述：', segment.action);
-  if (newAction === null) return;
-  
-  const newMood = prompt('编辑心情：', segment.mood);
-  if (newMood === null) return;
-  
-  const newThought = prompt('编辑内心想法：', segment.innerThought);
-  if (newThought === null) return;
-  
-  segment.action = newAction;
-  segment.mood = newMood;
-  segment.innerThought = newThought;
-  segment.isEdited = true;
-  segment.editTime = new Date().toISOString();
-  
-  await saveMonitorData(currentMonitorData);
-  renderMonitorTimeline(currentMonitorData);
-};
-
-// 切换高亮 - 暴露到全局作用域
-window.toggleMonitorHighlight = async function(timeRange) {
-  if (!currentMonitorData) return;
-  
-  const segment = currentMonitorData.timeline.find(s => s.timeRange === timeRange);
-  if (!segment) return;
-  
-  segment.isHighlighted = !segment.isHighlighted;
-  
-  await saveMonitorData(currentMonitorData);
-  renderMonitorTimeline(currentMonitorData);
-};
-
-// 重新生成单个时段 - 暴露到全局作用域
-window.regenerateMonitorSegment = async function(timeRange) {
-  if (!currentMonitorData || !state.activeChatId) return;
-  
-  const confirmed = await showCustomConfirm('确认', '是否重新生成此时段？');
-  if (!confirmed) return;
-  
-  const chat = state.chats[state.activeChatId];
-  const segmentIndex = currentMonitorData.timeline.findIndex(s => s.timeRange === timeRange);
-  if (segmentIndex === -1) return;
-  
-  const [startTime] = timeRange.split('-');
-  const startHour = parseInt(startTime.split(':')[0]);
-  const config = state.globalSettings.characterMonitor;
-  const endHour = startHour + config.hoursPerSegment;
-  
-  const segment = {
-    timeRange,
-    startHour,
-    endHour
-  };
-  
-  try {
-    const content = await generateSegmentContent(chat, currentMonitorData.date, segment);
-    currentMonitorData.timeline[segmentIndex] = {
-      timeRange,
-      action: content.action,
-      mood: content.mood,
-      innerThought: content.innerThought,
-      isEdited: false,
-      editTime: null,
-      isHighlighted: currentMonitorData.timeline[segmentIndex].isHighlighted
-    };
-    
-    await saveMonitorData(currentMonitorData);
-    renderMonitorTimeline(currentMonitorData);
-    await showCustomAlert('完成', '重新生成成功！');
-  } catch (error) {
-    console.error('重新生成失败:', error);
-    await showCustomAlert('错误', '重新生成失败，请重试');
-  }
-};
-
-// 保存监测数据
-async function saveMonitorData(monitorData) {
-  const key = `characterMonitor_${monitorData.characterId}_${monitorData.date}`;
-  localStorage.setItem(key, JSON.stringify(monitorData));
-  await cleanupOldMonitorData(monitorData.characterId);
-}
-
-// 加载监测数据
-async function loadMonitorData(characterId, date) {
-  const key = `characterMonitor_${characterId}_${date}`;
-  const data = localStorage.getItem(key);
-  return data ? JSON.parse(data) : null;
-}
-
-// 清理过期数据
-async function cleanupOldMonitorData(characterId) {
-  const config = state.globalSettings.characterMonitor;
-  const maxDays = config.historyDays;
-  const cutoffDate = new Date();
-  cutoffDate.setDate(cutoffDate.getDate() - maxDays);
-  
-  const prefix = `characterMonitor_${characterId}_`;
-  const keysToRemove = [];
-  
-  for (let i = 0; i < localStorage.length; i++) {
-    const key = localStorage.key(i);
-    if (key && key.startsWith(prefix)) {
-      const dateStr = key.replace(prefix, '');
-      const date = new Date(dateStr);
-      if (date < cutoffDate) {
-        keysToRemove.push(key);
-      }
-    }
-  }
-  
-  keysToRemove.forEach(key => localStorage.removeItem(key));
-}
-
-// 辅助函数
-function formatMonitorDate(date) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
-
-function updateMonitorDateDisplay(date) {
-  const weekdays = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'];
-  const year = date.getFullYear();
-  const month = date.getMonth() + 1;
-  const day = date.getDate();
-  const weekday = weekdays[date.getDay()];
-  
-  document.getElementById('monitor-date-display').textContent = 
-    `${year}年${month}月${day}日 ${weekday}`;
-}
-
-async function getRecentMessagesForMonitor(chatId, count = 10) {
-  const chat = state.chats[chatId];
-  if (!chat || !chat.messages) return '无';
-  
-  const recentMsgs = chat.messages.slice(-count);
-  return recentMsgs.map(m => {
-    const role = m.role === 'user' ? '用户' : chat.name;
-    return `${role}: ${m.content}`;
-  }).join('\n');
-}
-
-// ==================== 角色监测功能结束 ====================
 
 let memoryCache = []; // 缓存所有需要显示的记忆
 let memoryRenderCount = 0; // 当前已渲染数量
@@ -5883,11 +5390,6 @@ function showChoiceModal(title, options) {
           enabled: false,
           pattern: 'short'
         },
-        mergeMessages: {
-          enabled: false,
-          threshold: 3,
-          timeWindow: 60
-        },
         sound: {
           enabled: false,
           useGlobalSound: true,
@@ -5914,10 +5416,6 @@ function showChoiceModal(title, options) {
         vibration: {
           ...defaultGlobalSettings.systemNotification.vibration,
           ...(state.globalSettings.systemNotification.vibration || {})
-        },
-        mergeMessages: {
-          ...defaultGlobalSettings.systemNotification.mergeMessages,
-          ...(state.globalSettings.systemNotification.mergeMessages || {})
         },
         sound: {
           ...defaultGlobalSettings.systemNotification.sound,
@@ -29292,10 +28790,6 @@ ${chat.settings.myPersona}
   }
 
   // ========== 系统级通知功能 ==========
-  
-  // 消息队列和定时器（用于消息合并）
-  const messageQueue = {};
-  const mergeTimers = {};
 
   // 初始化系统通知
   function initSystemNotification() {
@@ -29617,11 +29111,6 @@ ${chat.settings.myPersona}
     const vibrationSelector = document.getElementById('vibration-pattern-selector');
     const vibrationPattern = document.getElementById('vibration-pattern-select');
     
-    const mergeSwitch = document.getElementById('merge-messages-enabled-switch');
-    const mergeDetails = document.getElementById('merge-messages-details');
-    const mergeThreshold = document.getElementById('merge-threshold-input');
-    const mergeTimeWindow = document.getElementById('merge-time-window-input');
-    
     const soundSwitch = document.getElementById('notification-sound-enabled-switch');
     const soundDetails = document.getElementById('notification-sound-details');
     const useGlobalSound = document.getElementById('use-global-sound-switch');
@@ -29689,25 +29178,6 @@ ${chat.settings.myPersona}
       });
     }
     
-    if (mergeSwitch) {
-      mergeSwitch.addEventListener('change', () => {
-        state.globalSettings.systemNotification.mergeMessages.enabled = mergeSwitch.checked;
-        mergeDetails.style.display = mergeSwitch.checked ? 'block' : 'none';
-      });
-    }
-    
-    if (mergeThreshold) {
-      mergeThreshold.addEventListener('input', () => {
-        state.globalSettings.systemNotification.mergeMessages.threshold = parseInt(mergeThreshold.value) || 3;
-      });
-    }
-    
-    if (mergeTimeWindow) {
-      mergeTimeWindow.addEventListener('input', () => {
-        state.globalSettings.systemNotification.mergeMessages.timeWindow = parseInt(mergeTimeWindow.value) || 60;
-      });
-    }
-    
     if (soundSwitch) {
       soundSwitch.addEventListener('change', () => {
         state.globalSettings.systemNotification.sound.enabled = soundSwitch.checked;
@@ -29747,11 +29217,6 @@ ${chat.settings.myPersona}
     const vibrationSelector = document.getElementById('vibration-pattern-selector');
     const vibrationPattern = document.getElementById('vibration-pattern-select');
     
-    const mergeSwitch = document.getElementById('merge-messages-enabled-switch');
-    const mergeDetails = document.getElementById('merge-messages-details');
-    const mergeThreshold = document.getElementById('merge-threshold-input');
-    const mergeTimeWindow = document.getElementById('merge-time-window-input');
-    
     const soundSwitch = document.getElementById('notification-sound-enabled-switch');
     const soundDetails = document.getElementById('notification-sound-details');
     const useGlobalSound = document.getElementById('use-global-sound-switch');
@@ -29790,20 +29255,6 @@ ${chat.settings.myPersona}
     
     if (vibrationPattern) {
       vibrationPattern.value = config.vibration?.pattern || 'short';
-    }
-    
-    // 加载消息合并设置
-    if (mergeSwitch) {
-      mergeSwitch.checked = config.mergeMessages?.enabled || false;
-      mergeDetails.style.display = config.mergeMessages?.enabled ? 'block' : 'none';
-    }
-    
-    if (mergeThreshold) {
-      mergeThreshold.value = config.mergeMessages?.threshold || 3;
-    }
-    
-    if (mergeTimeWindow) {
-      mergeTimeWindow.value = config.mergeMessages?.timeWindow || 60;
     }
     
     // 加载声音设置
@@ -31512,6 +30963,824 @@ window.toggleReadingFullscreen = toggleReadingFullscreen;
     renderCharacterSelector();
     showScreen('character-selection-screen');
   }
+
+  // MY Phone 相关变量
+  let activeMyPhoneCharacterId = null;
+
+  function openMyphoneScreen() {
+    renderMyPhoneCharacterSelector();
+    showScreen('myphone-selection-screen');
+  }
+
+  function renderMyPhoneCharacterSelector() {
+    const gridEl = document.getElementById('myphone-character-grid');
+    gridEl.innerHTML = '';
+
+    const characters = Object.values(state.chats).filter(chat => !chat.isGroup);
+
+    if (characters.length === 0) {
+      gridEl.innerHTML = '<p style="text-align:center; color: var(--text-secondary); padding: 50px 0;">还没有可以查看手机的角色哦~</p>';
+      return;
+    }
+
+    characters.forEach(char => {
+      const item = document.createElement('div');
+      item.className = 'character-select-item';
+      item.innerHTML = `
+            <img src="${char.settings.aiAvatar || defaultAvatar}" class="avatar">
+            <span class="name">${char.name}</span>
+        `;
+      item.addEventListener('click', () => switchToMyPhoneCharacter(char.id));
+      gridEl.appendChild(item);
+    });
+  }
+
+  async function switchToMyPhoneCharacter(characterId) {
+    activeMyPhoneCharacterId = characterId;
+    console.log(`已切换到角色 ${characterId} 查看我的手机`);
+
+    applyMyPhoneWallpaper();
+    applyMyPhoneAppIcons();
+
+    renderMyPhoneHomeScreen();
+    showScreen('myphone-screen');
+  }
+
+  function renderMyPhoneHomeScreen() {
+    switchToMyPhoneScreen('myphone-home-screen');
+  }
+
+  function switchToMyPhoneScreen(screenId) {
+    document.querySelectorAll('#myphone-screen .char-screen').forEach(s => s.classList.remove('active'));
+    document.getElementById(screenId).classList.add('active');
+  }
+
+  function switchToMyPhoneHomeScreen() {
+    switchToMyPhoneScreen('myphone-home-screen');
+  }
+
+  function switchToCPhone() {
+    // 从 MY Phone 切换回 CP Phone 角色选择
+    openCharacterSelector();
+  }
+
+  function openMyPhoneSettings() {
+    switchToMyPhoneScreen('myphone-settings-screen');
+  }
+
+  function openMyPhoneViewRecords() {
+    switchToMyPhoneScreen('myphone-view-records-screen');
+  }
+
+  // MY Phone 添加联系人选择弹窗
+  async function showMyPhoneAddContactDialog() {
+    const modal = document.getElementById('myphone-add-choice-modal');
+    if (!modal) return;
+    
+    modal.classList.add('visible');
+  }
+
+  // 手动创建角色
+  async function manualCreateMyPhoneContact() {
+    // 关闭选择弹窗
+    document.getElementById('myphone-add-choice-modal')?.classList.remove('visible');
+    
+    // 第一步：输入联系人名称
+    const name = await showCustomPrompt('添加联系人 (1/3)', '请输入联系人名称');
+    if (!name || !name.trim()) return;
+    
+    // 第二步：输入备注（可选）
+    const remark = await showCustomPrompt('添加联系人 (2/3)', '请输入备注（可选，显示在列表中）', '', 'text');
+    
+    // 第三步：选择头像方式
+    const avatarChoice = await showChoiceModal('添加联系人 (3/3)', [
+      { text: '使用默认头像', value: 'default' },
+      { text: '上传本地图片', value: 'upload' },
+      { text: '输入图片URL', value: 'url' }
+    ]);
+    
+    let finalAvatar = defaultAvatar;
+    
+    if (avatarChoice === 'upload') {
+      // 上传本地图片
+      const fileInput = document.createElement('input');
+      fileInput.type = 'file';
+      fileInput.accept = 'image/*';
+      
+      const avatarData = await new Promise((resolve) => {
+        fileInput.onchange = (e) => {
+          const file = e.target.files[0];
+          if (file) {
+            const reader = new FileReader();
+            reader.onload = (event) => resolve(event.target.result);
+            reader.readAsDataURL(file);
+          } else {
+            resolve(null);
+          }
+        };
+        fileInput.click();
+      });
+      
+      if (avatarData) {
+        finalAvatar = avatarData;
+      }
+    } else if (avatarChoice === 'url') {
+      // 输入URL
+      const avatarUrl = await showCustomPrompt('输入头像URL', '请输入图片URL地址');
+      if (avatarUrl && avatarUrl.trim()) {
+        finalAvatar = avatarUrl.trim();
+      }
+    }
+    
+    // 添加联系人
+    await addMyPhoneContact(name.trim(), remark ? remark.trim() : '', finalAvatar);
+    
+    // 刷新列表
+    renderMyPhoneSimulatedQQ();
+  }
+
+  // 显示导入主屏幕角色弹窗
+  async function showImportMainScreenCharacters() {
+    // 关闭选择弹窗
+    document.getElementById('myphone-add-choice-modal')?.classList.remove('visible');
+    
+    if (!activeMyPhoneCharacterId) return;
+    const currentChar = state.chats[activeMyPhoneCharacterId];
+    if (!currentChar) return;
+    
+    // 获取所有非群组角色，排除当前角色
+    const allCharacters = Object.values(state.chats).filter(chat => 
+      !chat.isGroup && chat.id !== activeMyPhoneCharacterId
+    );
+    
+    if (allCharacters.length === 0) {
+      showCustomAlert('提示', '没有可导入的角色');
+      return;
+    }
+    
+    // 渲染角色列表
+    const listEl = document.getElementById('myphone-import-list');
+    listEl.innerHTML = '';
+    
+    allCharacters.forEach(char => {
+      const item = document.createElement('div');
+      item.className = 'chat-list-item';
+      item.style.padding = '15px';
+      item.style.borderBottom = '1px solid var(--border-color)';
+      item.style.cursor = 'pointer';
+      item.style.display = 'flex';
+      item.style.alignItems = 'center';
+      item.style.gap = '15px';
+      
+      const charAvatar = char.settings.aiAvatar || defaultAvatar;
+      
+      // 获取最后一条消息
+      const lastMessages = char.history.filter(m => !m.isHidden).slice(-10);
+      const lastMsg = lastMessages.slice(-1)[0];
+      let lastMsgText = '暂无消息';
+      if (lastMsg) {
+        if (typeof lastMsg.content === 'string') {
+          lastMsgText = lastMsg.content.substring(0, 30);
+        } else if (Array.isArray(lastMsg.content)) {
+          lastMsgText = '[图片]';
+        }
+      }
+      
+      item.innerHTML = `
+        <input type="checkbox" class="myphone-import-checkbox" data-char-id="${char.id}" style="width: 20px; height: 20px; cursor: pointer;">
+        <img src="${charAvatar}" style="width: 50px; height: 50px; border-radius: 50%; object-fit: cover;">
+        <div style="flex: 1; overflow: hidden;">
+          <div style="font-weight: 500; font-size: 16px; margin-bottom: 5px;">${char.name}</div>
+          <div style="font-size: 14px; color: #999; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${lastMsgText}</div>
+        </div>
+      `;
+      
+      // 点击整行切换选中状态
+      item.addEventListener('click', (e) => {
+        if (e.target.type !== 'checkbox') {
+          const checkbox = item.querySelector('.myphone-import-checkbox');
+          checkbox.checked = !checkbox.checked;
+          updateImportSelectAllState();
+        }
+      });
+      
+      // checkbox 单独监听
+      const checkbox = item.querySelector('.myphone-import-checkbox');
+      checkbox.addEventListener('change', () => {
+        updateImportSelectAllState();
+      });
+      
+      listEl.appendChild(item);
+    });
+    
+    // 显示弹窗
+    document.getElementById('myphone-import-characters-modal').classList.add('visible');
+  }
+
+  // 更新全选状态
+  function updateImportSelectAllState() {
+    const allCheckboxes = document.querySelectorAll('.myphone-import-checkbox');
+    const selectAllCheckbox = document.getElementById('select-all-myphone-import');
+    
+    if (allCheckboxes.length === 0) return;
+    
+    const checkedCount = Array.from(allCheckboxes).filter(cb => cb.checked).length;
+    selectAllCheckbox.checked = checkedCount === allCheckboxes.length;
+  }
+
+  // 导入选中的角色
+  async function importSelectedCharacters() {
+    if (!activeMyPhoneCharacterId) return;
+    const currentChar = state.chats[activeMyPhoneCharacterId];
+    if (!currentChar) return;
+    
+    // 获取选中的角色ID
+    const selectedCheckboxes = Array.from(document.querySelectorAll('.myphone-import-checkbox:checked'));
+    
+    if (selectedCheckboxes.length === 0) {
+      showCustomAlert('提示', '请至少选择一个角色');
+      return;
+    }
+    
+    const selectedCharIds = selectedCheckboxes.map(cb => cb.dataset.charId);
+    
+    // 初始化数组
+    if (!currentChar.myPhoneSimulatedQQConversations) {
+      currentChar.myPhoneSimulatedQQConversations = [];
+    }
+    
+    // 导入每个选中的角色
+    let importCount = 0;
+    for (const charId of selectedCharIds) {
+      const char = state.chats[charId];
+      if (!char) continue;
+      
+      // 检查是否已经存在
+      const existingIndex = currentChar.myPhoneSimulatedQQConversations.findIndex(
+        conv => conv.importedFromCharId === charId
+      );
+      
+      if (existingIndex !== -1) {
+        // 已存在，跳过
+        continue;
+      }
+      
+      // 获取最后10条消息
+      const recentMessages = char.history.filter(m => !m.isHidden).slice(-10);
+      
+      // 转换消息格式 - 保持原始格式以兼容createMessageElement
+      const convertedMessages = recentMessages.map(msg => {
+        const isUser = msg.role === 'user';
+        
+        // 保持原始消息结构
+        const convertedMsg = {
+          role: msg.role,
+          content: msg.content,
+          timestamp: msg.timestamp || Date.now(),
+          sender: isUser ? (state.qzoneSettings.nickname || '我') : char.name
+        };
+        
+        // 如果有其他属性，也保留
+        if (msg.type) convertedMsg.type = msg.type;
+        if (msg.imageUrl) convertedMsg.imageUrl = msg.imageUrl;
+        if (msg.voiceUrl) convertedMsg.voiceUrl = msg.voiceUrl;
+        if (msg.voiceText) convertedMsg.voiceText = msg.voiceText;
+        if (msg.duration) convertedMsg.duration = msg.duration;
+        
+        return convertedMsg;
+      });
+      
+      // 获取最后一条消息文本
+      let lastMessageText = '暂无消息';
+      if (convertedMessages.length > 0) {
+        const lastMsg = convertedMessages[convertedMessages.length - 1];
+        lastMessageText = lastMsg.content.substring(0, 30);
+      }
+      
+      // 创建新联系人
+      const newContact = {
+        name: char.name,
+        originalName: char.name,
+        avatar: char.settings.aiAvatar || defaultAvatar,
+        lastMessage: lastMessageText,
+        messages: convertedMessages,
+        isImported: true,
+        importedFromCharId: charId
+      };
+      
+      currentChar.myPhoneSimulatedQQConversations.push(newContact);
+      importCount++;
+    }
+    
+    // 保存到数据库
+    await db.chats.put(currentChar);
+    
+    // 关闭弹窗
+    document.getElementById('myphone-import-characters-modal').classList.remove('visible');
+    
+    // 刷新列表
+    renderMyPhoneSimulatedQQ();
+    
+    // 显示成功提示
+    showCustomAlert('成功', `已导入 ${importCount} 个角色`);
+  }
+
+  // 添加MY Phone联系人
+  async function addMyPhoneContact(name, remark, avatar) {
+    if (!activeMyPhoneCharacterId) return;
+    const char = state.chats[activeMyPhoneCharacterId];
+    if (!char) return;
+    
+    // 初始化数组
+    if (!char.myPhoneSimulatedQQConversations) {
+      char.myPhoneSimulatedQQConversations = [];
+    }
+    
+    // 创建新联系人
+    const newContact = {
+      name: remark || name,
+      originalName: name,
+      avatar: avatar || defaultAvatar,
+      lastMessage: '暂无消息',
+      messages: [],
+      isManuallyAdded: true // 标记为手动添加
+    };
+    
+    // 添加到列表
+    char.myPhoneSimulatedQQConversations.unshift(newContact);
+    
+    // 保存到数据库
+    await db.chats.put(char);
+    
+    showCustomAlert('成功', `已添加联系人：${name}`);
+  }
+
+  // 打开联系人设置界面
+  function openMyPhoneContactSettings() {
+    const char = state.chats[activeMyPhoneCharacterId];
+    if (!char) return;
+    
+    const index = window.currentMyPhoneConversationIndex;
+    if (index === -1 || index === undefined) return;
+    
+    const contact = char.myPhoneSimulatedQQConversations[index];
+    if (!contact) return;
+    
+    // 填充设置界面
+    document.getElementById('myphone-settings-avatar-img').src = contact.avatar || defaultAvatar;
+    document.getElementById('myphone-settings-name').value = contact.originalName || contact.name;
+    document.getElementById('myphone-settings-remark').value = contact.name;
+    
+    // 渲染对话列表
+    renderMyPhoneContactMessages(contact);
+    
+    switchToMyPhoneScreen('myphone-contact-settings-screen');
+  }
+
+  // 渲染联系人的对话列表
+  function renderMyPhoneContactMessages(contact) {
+    const listEl = document.getElementById('myphone-conversation-list');
+    listEl.innerHTML = '';
+    
+    if (!contact.messages || contact.messages.length === 0) {
+      listEl.innerHTML = '<p style="text-align: center; color: var(--text-secondary); padding: 20px;">暂无对话记录</p>';
+      return;
+    }
+    
+    contact.messages.forEach((msg, idx) => {
+      const msgEl = document.createElement('div');
+      msgEl.style.cssText = 'padding: 10px; border: 1px solid var(--border-color); border-radius: 6px; margin-bottom: 8px; background: var(--secondary-bg);';
+      
+      // 根据消息类型显示不同内容
+      let contentDisplay = '';
+      let typeLabel = '';
+      
+      if (msg.type === 'voice_message') {
+        typeLabel = '[语音]';
+        contentDisplay = msg.content;
+      } else if (msg.type === 'ai_image') {
+        typeLabel = '[图片]';
+        contentDisplay = msg.content;
+      } else if (msg.type === 'transfer') {
+        typeLabel = '[转账]';
+        contentDisplay = `¥${msg.amount} - ${msg.note || ''}`;
+      } else {
+        contentDisplay = msg.content;
+      }
+      
+      msgEl.innerHTML = `
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
+          <div>
+            <span style="font-weight: 500; color: var(--text-color);">${msg.role === 'user' ? '我' : contact.name}</span>
+            ${typeLabel ? `<span style="margin-left: 8px; padding: 2px 6px; background: var(--accent-color); color: white; border-radius: 4px; font-size: 11px;">${typeLabel}</span>` : ''}
+          </div>
+          <button onclick="deleteMyPhoneMessage(${idx})" style="padding: 4px 8px; background: #ff4444; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;">删除</button>
+        </div>
+        <div style="color: var(--text-color);">${contentDisplay}</div>
+      `;
+      listEl.appendChild(msgEl);
+    });
+  }
+
+  // 删除对话消息
+  window.deleteMyPhoneMessage = async function(msgIndex) {
+    const char = state.chats[activeMyPhoneCharacterId];
+    if (!char) return;
+    
+    const index = window.currentMyPhoneConversationIndex;
+    const contact = char.myPhoneSimulatedQQConversations[index];
+    if (!contact) return;
+    
+    contact.messages.splice(msgIndex, 1);
+    await db.chats.put(char);
+    
+    renderMyPhoneContactMessages(contact);
+  };
+
+  // 保存联系人设置
+  async function saveMyPhoneContactSettings() {
+    const char = state.chats[activeMyPhoneCharacterId];
+    if (!char) return;
+    
+    const index = window.currentMyPhoneConversationIndex;
+    const contact = char.myPhoneSimulatedQQConversations[index];
+    if (!contact) return;
+    
+    const newName = document.getElementById('myphone-settings-name').value.trim();
+    const newRemark = document.getElementById('myphone-settings-remark').value.trim();
+    
+    if (!newName) {
+      showCustomAlert('提示', '联系人名称不能为空');
+      return;
+    }
+    
+    contact.originalName = newName;
+    contact.name = newRemark || newName;
+    
+    await db.chats.put(char);
+    
+    showCustomAlert('成功', '设置已保存');
+    
+    // 返回对话界面
+    await openMyPhoneConversation(index);
+  }
+
+  // 更换联系人头像
+  async function changeMyPhoneContactAvatar() {
+    const avatarChoice = await showChoiceModal('选择头像方式', [
+      { text: '上传本地图片', value: 'upload' },
+      { text: '输入图片URL', value: 'url' }
+    ]);
+    
+    let newAvatar = null;
+    
+    if (avatarChoice === 'upload') {
+      const fileInput = document.createElement('input');
+      fileInput.type = 'file';
+      fileInput.accept = 'image/*';
+      
+      newAvatar = await new Promise((resolve) => {
+        fileInput.onchange = (e) => {
+          const file = e.target.files[0];
+          if (file) {
+            const reader = new FileReader();
+            reader.onload = (event) => resolve(event.target.result);
+            reader.readAsDataURL(file);
+          } else {
+            resolve(null);
+          }
+        };
+        fileInput.click();
+      });
+    } else if (avatarChoice === 'url') {
+      const avatarUrl = await showCustomPrompt('输入头像URL', '请输入图片URL地址');
+      if (avatarUrl && avatarUrl.trim()) {
+        newAvatar = avatarUrl.trim();
+      }
+    }
+    
+    if (newAvatar) {
+      const char = state.chats[activeMyPhoneCharacterId];
+      const index = window.currentMyPhoneConversationIndex;
+      const contact = char.myPhoneSimulatedQQConversations[index];
+      
+      contact.avatar = newAvatar;
+      document.getElementById('myphone-settings-avatar-img').src = newAvatar;
+      
+      await db.chats.put(char);
+    }
+  }
+
+  // 添加对话消息
+  async function addMyPhoneMessage() {
+    const role = await showChoiceModal('选择发送者', [
+      { text: '我发送', value: 'user' },
+      { text: `${document.getElementById('myphone-settings-name').value}发送`, value: 'assistant' }
+    ]);
+    
+    if (!role) return;
+    
+    // 选择消息类型
+    const msgType = await showChoiceModal('选择消息类型', [
+      { text: '文字消息', value: 'text' },
+      { text: '图片', value: 'image' },
+      { text: '语音', value: 'voice' },
+      { text: '转账', value: 'transfer' }
+    ]);
+    
+    if (!msgType) return;
+    
+    const char = state.chats[activeMyPhoneCharacterId];
+    const index = window.currentMyPhoneConversationIndex;
+    const contact = char.myPhoneSimulatedQQConversations[index];
+    
+    if (!contact.messages) {
+      contact.messages = [];
+    }
+    
+    let newMessage = {
+      role: role,
+      timestamp: new Date().toISOString()
+    };
+    
+    let lastMsgPreview = '';
+    
+    if (msgType === 'text') {
+      // 文字消息
+      const content = await showCustomPrompt('输入消息内容', '请输入要添加的消息', '', 'textarea');
+      if (!content || !content.trim()) return;
+      
+      newMessage.content = content.trim();
+      lastMsgPreview = content.trim();
+      
+    } else if (msgType === 'image') {
+      // 图片消息
+      const description = await showCustomPrompt('图片描述', '请输入图片的中文描述');
+      if (!description || !description.trim()) return;
+      
+      const imagePrompt = await showCustomPrompt('图片提示词（可选）', '请输入英文图片生成提示词（可选，留空则不生成图片）');
+      
+      newMessage.type = 'ai_image';
+      newMessage.content = description.trim();
+      if (imagePrompt && imagePrompt.trim()) {
+        newMessage.image_prompt = imagePrompt.trim();
+      }
+      lastMsgPreview = '[图片]';
+      
+    } else if (msgType === 'voice') {
+      // 语音消息
+      const content = await showCustomPrompt('语音内容', '请输入语音的文字内容', '', 'textarea');
+      if (!content || !content.trim()) return;
+      
+      newMessage.type = 'voice_message';
+      newMessage.content = content.trim();
+      lastMsgPreview = '[语音]';
+      
+    } else if (msgType === 'transfer') {
+      // 转账消息
+      const amount = await showCustomPrompt('转账金额', '请输入转账金额（数字）');
+      if (!amount || !amount.trim()) return;
+      
+      const note = await showCustomPrompt('转账备注', '请输入转账备注（可选）');
+      
+      const senderName = role === 'user' ? (char.settings.myNickname || '我') : contact.name;
+      const receiverName = role === 'user' ? contact.name : (char.settings.myNickname || '我');
+      
+      newMessage.type = 'transfer';
+      newMessage.amount = parseFloat(amount.trim()) || 0;
+      newMessage.note = note ? note.trim() : '转账';
+      newMessage.senderName = senderName;
+      newMessage.receiverName = receiverName;
+      newMessage.status = 'accepted';
+      newMessage.content = `转账 ¥${newMessage.amount}`;
+      lastMsgPreview = '[转账]';
+    }
+    
+    contact.messages.push(newMessage);
+    
+    // 更新最后一条消息
+    contact.lastMessage = lastMsgPreview.substring(0, 20) + (lastMsgPreview.length > 20 ? '...' : '');
+    
+    await db.chats.put(char);
+    
+    renderMyPhoneContactMessages(contact);
+  }
+
+  // My Phone 转账操作相关函数
+  let activeMyPhoneTransferTimestamp = null;
+  
+  function showMyPhoneTransferActionModal(timestamp) {
+    activeMyPhoneTransferTimestamp = timestamp;
+    
+    const char = state.chats[activeMyPhoneCharacterId];
+    const index = window.currentMyPhoneConversationIndex;
+    
+    let message;
+    if (index === -1) {
+      // 与角色的真实对话
+      message = char.history.find(m => m.timestamp === timestamp);
+    } else {
+      // 模拟对话
+      const contact = char.myPhoneSimulatedQQConversations[index];
+      message = contact.messages.find(m => m.timestamp === timestamp);
+    }
+    
+    if (message) {
+      document.getElementById('transfer-sender-name').textContent = message.senderName || '对方';
+    }
+    document.getElementById('transfer-actions-modal').classList.add('visible');
+  }
+  
+  async function handleMyPhoneTransferResponse(choice) {
+    if (!activeMyPhoneTransferTimestamp) return;
+    
+    const timestamp = activeMyPhoneTransferTimestamp;
+    const char = state.chats[activeMyPhoneCharacterId];
+    const index = window.currentMyPhoneConversationIndex;
+    
+    let message, messageArray;
+    
+    if (index === -1) {
+      // 与角色的真实对话
+      messageArray = char.history;
+      message = messageArray.find(m => m.timestamp === timestamp);
+    } else {
+      // 模拟对话
+      const contact = char.myPhoneSimulatedQQConversations[index];
+      messageArray = contact.messages;
+      message = messageArray.find(m => m.timestamp === timestamp);
+    }
+    
+    if (!message) return;
+    
+    // 防止重复点击
+    if (message.status && message.status !== 'pending') {
+      hideTransferActionModal();
+      return;
+    }
+    
+    let transferAmount = parseFloat(message.amount);
+    if (isNaN(transferAmount)) {
+      transferAmount = 0;
+    }
+    
+    message.status = choice;
+    
+    if (choice === 'declined') {
+      // 拒收逻辑 - 添加退款消息
+      const refundMessage = {
+        role: 'user',
+        type: 'transfer',
+        isRefund: true,
+        amount: transferAmount,
+        note: '已拒收对方转账',
+        senderName: char.settings.myNickname || '我',
+        receiverName: message.senderName,
+        timestamp: Date.now(),
+        status: 'accepted'
+      };
+      messageArray.push(refundMessage);
+      
+      // 如果是真实对话，添加隐藏系统消息
+      if (index === -1) {
+        const hiddenMessage = {
+          role: 'system',
+          content: `[系统提示：你拒绝并退还了"${message.senderName}"的转账。]`,
+          timestamp: Date.now() + 1,
+          isHidden: true
+        };
+        messageArray.push(hiddenMessage);
+      }
+    } else {
+      // 接收逻辑
+      if (transferAmount > 0 && index === -1) {
+        // 只有真实对话才记账
+        const success = await processTransaction(transferAmount, 'income', `收到转账-${message.senderName}`);
+        
+        if (success) {
+          await showCustomAlert("收款成功", `已存入余额：+ ¥${transferAmount.toFixed(2)}`);
+          
+          // 添加已收款消息
+          const receivedMessage = {
+            role: 'user',
+            type: 'transfer',
+            isReceived: true,
+            amount: transferAmount,
+            note: '已收款',
+            senderName: '我',
+            receiverName: message.senderName,
+            timestamp: Date.now(),
+            status: 'accepted'
+          };
+          messageArray.push(receivedMessage);
+        } else {
+          alert("警告：金额入账失败！");
+        }
+      }
+      
+      // 如果是真实对话，添加隐藏系统消息
+      if (index === -1) {
+        const hiddenMessage = {
+          role: 'system',
+          content: `[系统提示：你接受了"${message.senderName}"的转账。]`,
+          timestamp: Date.now() + 1,
+          isHidden: true
+        };
+        messageArray.push(hiddenMessage);
+      }
+    }
+    
+    // 保存更改
+    await db.chats.put(char);
+    
+    // 关闭弹窗并刷新界面
+    hideTransferActionModal();
+    activeMyPhoneTransferTimestamp = null;
+    
+    // 重新打开对话以刷新显示
+    await openMyPhoneConversation(index);
+  }
+
+  function applyMyPhoneWallpaper() {
+    if (!activeMyPhoneCharacterId) return;
+    const char = state.chats[activeMyPhoneCharacterId];
+    if (!char) return;
+
+    const container = document.getElementById('myphone-layout-container');
+    if (!container) return;
+
+    if (char.settings.cphoneWallpaper) {
+      container.style.backgroundImage = `url(${char.settings.cphoneWallpaper})`;
+      container.style.backgroundSize = 'cover';
+      container.style.backgroundPosition = 'center';
+    } else {
+      container.style.backgroundImage = '';
+    }
+  }
+
+  function applyMyPhoneAppIcons() {
+    if (!activeMyPhoneCharacterId) return;
+    const char = state.chats[activeMyPhoneCharacterId];
+    if (!char) return;
+
+    const iconMapping = char.settings.cphoneAppIcons || {};
+    
+    Object.keys(iconMapping).forEach(appName => {
+      const imgEl = document.getElementById(`myphone-icon-img-${appName}`);
+      if (imgEl && iconMapping[appName]) {
+        imgEl.src = iconMapping[appName];
+      }
+    });
+  }
+
+  async function openMyPhoneApp(appName) {
+    if (!activeMyPhoneCharacterId) return;
+    const char = state.chats[activeMyPhoneCharacterId];
+
+    // 不再自动记录APP使用，改为只能手动添加或API生成
+
+    switch (appName) {
+      case 'qq':
+        renderMyPhoneSimulatedQQ();
+        switchToMyPhoneScreen('myphone-qq-screen');
+        break;
+      case 'album':
+        renderMyPhoneAlbum();
+        switchToMyPhoneScreen('myphone-album-screen');
+        break;
+      case 'browser':
+        renderMyPhoneBrowserHistory();
+        switchToMyPhoneScreen('myphone-browser-screen');
+        break;
+      case 'taobao':
+        renderMyPhoneTaobao();
+        switchToMyPhoneScreen('myphone-taobao-screen');
+        break;
+      case 'memo':
+        renderMyPhoneMemoList();
+        switchToMyPhoneScreen('myphone-memo-screen');
+        break;
+      case 'diary':
+        renderMyPhoneDiaryList();
+        switchToMyPhoneScreen('myphone-diary-screen');
+        break;
+      case 'amap':
+        renderMyPhoneAmap();
+        switchToMyPhoneScreen('myphone-amap-screen');
+        break;
+      case 'music':
+        renderMyPhoneMusicScreen();
+        switchToMyPhoneScreen('myphone-music-screen');
+        break;
+      case 'usage':
+        renderMyPhoneAppUsage();
+        switchToMyPhoneScreen('myphone-usage-screen');
+        break;
+    }
+  }
+
+  // logMyPhoneAppUsage 函数已移除，MYphone不再自动记录APP使用
+  // APP使用记录现在只能通过手动添加或API生成
 
 
   function renderCharacterSelector() {
@@ -34952,6 +35221,739 @@ ${recentHistoryWithUser}
   }
 
  
+// ==========================================
+// MY Phone 生成处理函数
+// ==========================================
+
+async function handleGenerateMyPhoneQQ() {
+  if (!activeMyPhoneCharacterId) return;
+  const chat = state.chats[activeMyPhoneCharacterId];
+  if (!chat) return;
+
+  const { proxyUrl, apiKey, model } = state.apiConfig;
+  if (!proxyUrl || !apiKey || !model) {
+    alert('请先在API设置中配置好API信息。');
+    return;
+  }
+
+  const userDisplayNameForAI = (state.qzoneSettings.nickname === '{{user}}' || !state.qzoneSettings.nickname) ? '用户' : state.qzoneSettings.nickname;
+  
+  // 获取与该角色的对话历史，了解用户特征
+  const maxMemory = chat.settings.maxMemory || 10;
+  const recentHistory = chat.history.slice(-maxMemory).map(msg => 
+    `${msg.role === 'user' ? userDisplayNameForAI : chat.name}: ${String(msg.content).substring(0, 50)}...`
+  ).join('\n');
+  
+  const prompt = `你现在要扮演"${userDisplayNameForAI}"（也就是我），基于我与"${chat.name}"的对话历史，推测我的性格、兴趣和社交圈，然后生成我的QQ聊天记录。
+
+## 我与"${chat.name}"的最近对话：
+${recentHistory}
+
+## 任务：
+请基于以上对话推测我的特征，然后生成3-5个我可能会聊天的联系人及其对话内容。这些对话应该反映出我的性格、兴趣和生活状态。
+
+请返回JSON格式：
+[
+  {
+    "name": "联系人名字",
+    "avatar": "",
+    "lastMessage": "最后一条消息预览",
+    "messages": [
+      {"role": "user", "content": "我发送的消息", "timestamp": "2024-01-01T12:00:00Z"},
+      {"role": "assistant", "content": "对方的回复", "timestamp": "2024-01-01T12:01:00Z"}
+    ]
+  }
+]`;
+
+  try {
+    const messagesForApi = [{ role: 'user', content: prompt }];
+    let isGemini = proxyUrl.includes('generativelanguage');
+    let geminiConfig = toGeminiRequestData(model, apiKey, '', messagesForApi);
+
+    const response = isGemini ?
+      await fetch(geminiConfig.url, geminiConfig.data) :
+      await fetch(`${proxyUrl}/v1/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({
+          model: model,
+          messages: messagesForApi,
+          temperature: 0.8
+        })
+      });
+
+    if (!response.ok) throw new Error(`API 错误: ${response.statusText}`);
+
+    const data = await response.json();
+    const aiResponseContent = getGeminiResponseText(data);
+    const cleanedJson = aiResponseContent.replace(/^```json\s*/, '').replace(/```$/, '').trim();
+    const conversations = JSON.parse(cleanedJson);
+
+    chat.myPhoneSimulatedQQConversations = conversations;
+    await db.chats.put(chat);
+  } catch (error) {
+    console.error("生成MY Phone QQ失败:", error);
+    throw error;
+  }
+}
+
+async function handleGenerateMyPhoneAlbum() {
+  if (!activeMyPhoneCharacterId) return;
+  const chat = state.chats[activeMyPhoneCharacterId];
+  if (!chat) return;
+
+  const { proxyUrl, apiKey, model } = state.apiConfig;
+  if (!proxyUrl || !apiKey || !model) {
+    alert('请先在API设置中配置好API信息。');
+    return;
+  }
+
+  const userDisplayNameForAI = (state.qzoneSettings.nickname === '{{user}}' || !state.qzoneSettings.nickname) ? '用户' : state.qzoneSettings.nickname;
+  
+  const maxMemory = chat.settings.maxMemory || 10;
+  const recentHistory = chat.history.slice(-maxMemory).map(msg => 
+    `${msg.role === 'user' ? userDisplayNameForAI : chat.name}: ${String(msg.content).substring(0, 50)}...`
+  ).join('\n');
+  
+  const prompt = `你现在要扮演"${userDisplayNameForAI}"（也就是我），基于我与"${chat.name}"的对话历史，推测我的生活、兴趣和审美，然后生成我相册中的照片。
+
+## 我与"${chat.name}"的最近对话：
+${recentHistory}
+
+## 任务：
+请基于以上对话推测我的特征，然后描述我相册中的5-8张照片。这些照片应该反映出我的生活状态、兴趣爱好和审美偏好。
+
+返回JSON格式：
+[
+  {
+    "description": "照片的中文描述（从我的视角描述）",
+    "image_prompt": "英文图像生成提示词"
+  }
+]`;
+
+  try {
+    const messagesForApi = [{ role: 'user', content: prompt }];
+    let isGemini = proxyUrl.includes('generativelanguage');
+    let geminiConfig = toGeminiRequestData(model, apiKey, '', messagesForApi);
+
+    const response = isGemini ?
+      await fetch(geminiConfig.url, geminiConfig.data) :
+      await fetch(`${proxyUrl}/v1/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({
+          model: model,
+          messages: messagesForApi,
+          temperature: 0.8
+        })
+      });
+
+    if (!response.ok) throw new Error(`API 错误: ${response.statusText}`);
+
+    const data = await response.json();
+    const aiResponseContent = getGeminiResponseText(data);
+    const cleanedJson = aiResponseContent.replace(/^```json\s*/, '').replace(/```$/, '').trim();
+    const photos = JSON.parse(cleanedJson);
+
+    chat.myPhoneAlbum = photos;
+    await db.chats.put(chat);
+  } catch (error) {
+    console.error("生成MY Phone相册失败:", error);
+    throw error;
+  }
+}
+
+async function handleGenerateMyPhoneBrowserHistory() {
+  if (!activeMyPhoneCharacterId) return;
+  const chat = state.chats[activeMyPhoneCharacterId];
+  if (!chat) return;
+
+  const { proxyUrl, apiKey, model } = state.apiConfig;
+  if (!proxyUrl || !apiKey || !model) {
+    alert('请先在API设置中配置好API信息。');
+    return;
+  }
+
+  const userDisplayNameForAI = (state.qzoneSettings.nickname === '{{user}}' || !state.qzoneSettings.nickname) ? '用户' : state.qzoneSettings.nickname;
+  
+  const maxMemory = chat.settings.maxMemory || 10;
+  const recentHistory = chat.history.slice(-maxMemory).map(msg => 
+    `${msg.role === 'user' ? userDisplayNameForAI : chat.name}: ${String(msg.content).substring(0, 50)}...`
+  ).join('\n');
+  
+  const prompt = `你现在要扮演"${userDisplayNameForAI}"（也就是我），基于我与"${chat.name}"的对话历史，推测我的兴趣和关注点，然后生成我的浏览器历史记录。
+
+## 我与"${chat.name}"的最近对话：
+${recentHistory}
+
+## 任务：
+请基于以上对话推测我的特征，然后生成我最近的5-8条浏览器历史记录。这些记录应该反映出我的兴趣爱好、关注的话题和信息需求。
+
+返回JSON格式：
+[
+  {
+    "title": "网页标题",
+    "url": "网址",
+    "content": "网页内容摘要（100-200字）"
+  }
+]`;
+
+  try {
+    const messagesForApi = [{ role: 'user', content: prompt }];
+    let isGemini = proxyUrl.includes('generativelanguage');
+    let geminiConfig = toGeminiRequestData(model, apiKey, '', messagesForApi);
+
+    const response = isGemini ?
+      await fetch(geminiConfig.url, geminiConfig.data) :
+      await fetch(`${proxyUrl}/v1/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({
+          model: model,
+          messages: messagesForApi,
+          temperature: 0.8
+        })
+      });
+
+    if (!response.ok) throw new Error(`API 错误: ${response.statusText}`);
+
+    const data = await response.json();
+    const aiResponseContent = getGeminiResponseText(data);
+    const cleanedJson = aiResponseContent.replace(/^```json\s*/, '').replace(/```$/, '').trim();
+    const history = JSON.parse(cleanedJson);
+
+    chat.myPhoneBrowserHistory = history;
+    await db.chats.put(chat);
+  } catch (error) {
+    console.error("生成MY Phone浏览记录失败:", error);
+    throw error;
+  }
+}
+
+async function handleGenerateMyPhoneTaobao() {
+  if (!activeMyPhoneCharacterId) return;
+  const chat = state.chats[activeMyPhoneCharacterId];
+  if (!chat) return;
+
+  const { proxyUrl, apiKey, model } = state.apiConfig;
+  if (!proxyUrl || !apiKey || !model) {
+    alert('请先在API设置中配置好API信息。');
+    return;
+  }
+
+  const userDisplayNameForAI = (state.qzoneSettings.nickname === '{{user}}' || !state.qzoneSettings.nickname) ? '用户' : state.qzoneSettings.nickname;
+  
+  const maxMemory = chat.settings.maxMemory || 10;
+  const recentHistory = chat.history.slice(-maxMemory).map(msg => 
+    `${msg.role === 'user' ? userDisplayNameForAI : chat.name}: ${String(msg.content).substring(0, 50)}...`
+  ).join('\n');
+  
+  const prompt = `你现在要扮演"${userDisplayNameForAI}"（也就是我），基于我与"${chat.name}"的对话历史，推测我的生活需求和消费习惯，然后生成我的淘宝购物记录。
+
+## 我与"${chat.name}"的最近对话：
+${recentHistory}
+
+## 任务：
+请基于以上对话推测我的特征，然后生成我最近的5-8条淘宝购物记录。这些记录应该反映出我的生活状态、需求和消费偏好。
+
+返回JSON格式：
+[
+  {
+    "name": "商品名称",
+    "price": "价格（数字）",
+    "date": "购买日期"
+  }
+]`;
+
+  try {
+    const messagesForApi = [{ role: 'user', content: prompt }];
+    let isGemini = proxyUrl.includes('generativelanguage');
+    let geminiConfig = toGeminiRequestData(model, apiKey, '', messagesForApi);
+
+    const response = isGemini ?
+      await fetch(geminiConfig.url, geminiConfig.data) :
+      await fetch(`${proxyUrl}/v1/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({
+          model: model,
+          messages: messagesForApi,
+          temperature: 0.8
+        })
+      });
+
+    if (!response.ok) throw new Error(`API 错误: ${response.statusText}`);
+
+    const data = await response.json();
+    const aiResponseContent = getGeminiResponseText(data);
+    const cleanedJson = aiResponseContent.replace(/^```json\s*/, '').replace(/```$/, '').trim();
+    const items = JSON.parse(cleanedJson);
+
+    chat.myPhoneTaobaoHistory = items;
+    await db.chats.put(chat);
+  } catch (error) {
+    console.error("生成MY Phone淘宝记录失败:", error);
+    throw error;
+  }
+}
+
+async function handleGenerateMyPhoneMemos() {
+  if (!activeMyPhoneCharacterId) return;
+  const chat = state.chats[activeMyPhoneCharacterId];
+  if (!chat) return;
+
+  const { proxyUrl, apiKey, model } = state.apiConfig;
+  if (!proxyUrl || !apiKey || !model) {
+    alert('请先在API设置中配置好API信息。');
+    return;
+  }
+
+  const userDisplayNameForAI = (state.qzoneSettings.nickname === '{{user}}' || !state.qzoneSettings.nickname) ? '用户' : state.qzoneSettings.nickname;
+  
+  const maxMemory = chat.settings.maxMemory || 10;
+  const recentHistory = chat.history.slice(-maxMemory).map(msg => 
+    `${msg.role === 'user' ? userDisplayNameForAI : chat.name}: ${String(msg.content).substring(0, 50)}...`
+  ).join('\n');
+  
+  const prompt = `你现在要扮演"${userDisplayNameForAI}"（也就是我），基于我与"${chat.name}"的对话历史，推测我的生活状态和待办事项，然后生成我的备忘录。
+
+## 我与"${chat.name}"的最近对话：
+${recentHistory}
+
+## 任务：
+请基于以上对话推测我的特征，然后生成我的3-5条备忘录。这些备忘录应该反映出我的生活安排、待办事项和关注点。
+
+返回JSON格式：
+[
+  {
+    "title": "备忘录标题",
+    "content": "备忘录内容",
+    "date": "日期"
+  }
+]`;
+
+  try {
+    const messagesForApi = [{ role: 'user', content: prompt }];
+    let isGemini = proxyUrl.includes('generativelanguage');
+    let geminiConfig = toGeminiRequestData(model, apiKey, '', messagesForApi);
+
+    const response = isGemini ?
+      await fetch(geminiConfig.url, geminiConfig.data) :
+      await fetch(`${proxyUrl}/v1/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({
+          model: model,
+          messages: messagesForApi,
+          temperature: 0.8
+        })
+      });
+
+    if (!response.ok) throw new Error(`API 错误: ${response.statusText}`);
+
+    const data = await response.json();
+    const aiResponseContent = getGeminiResponseText(data);
+    const cleanedJson = aiResponseContent.replace(/^```json\s*/, '').replace(/```$/, '').trim();
+    const memos = JSON.parse(cleanedJson);
+
+    chat.myPhoneMemos = memos;
+    await db.chats.put(chat);
+  } catch (error) {
+    console.error("生成MY Phone备忘录失败:", error);
+    throw error;
+  }
+}
+
+async function handleGenerateMyPhoneDiaries() {
+  if (!activeMyPhoneCharacterId) return;
+  const chat = state.chats[activeMyPhoneCharacterId];
+  if (!chat) return;
+
+  const { proxyUrl, apiKey, model } = state.apiConfig;
+  if (!proxyUrl || !apiKey || !model) {
+    alert('请先在API设置中配置好API信息。');
+    return;
+  }
+
+  const userDisplayNameForAI = (state.qzoneSettings.nickname === '{{user}}' || !state.qzoneSettings.nickname) ? '用户' : state.qzoneSettings.nickname;
+  
+  const maxMemory = chat.settings.maxMemory || 10;
+  const recentHistory = chat.history.slice(-maxMemory).map(msg => 
+    `${msg.role === 'user' ? userDisplayNameForAI : chat.name}: ${String(msg.content).substring(0, 50)}...`
+  ).join('\n');
+  
+  const prompt = `你现在要扮演"${userDisplayNameForAI}"（也就是我），基于我与"${chat.name}"的对话历史，推测我的内心世界和生活感受，然后生成我的日记。
+
+## 我与"${chat.name}"的最近对话：
+${recentHistory}
+
+## 任务：
+请基于以上对话推测我的特征，然后生成我的3-5篇日记。这些日记应该反映出我的情感状态、生活感悟和内心想法。
+
+返回JSON格式：
+[
+  {
+    "title": "日记标题",
+    "content": "日记内容（100-200字，第一人称）",
+    "date": "日期"
+  }
+]`;
+
+  try {
+    const messagesForApi = [{ role: 'user', content: prompt }];
+    let isGemini = proxyUrl.includes('generativelanguage');
+    let geminiConfig = toGeminiRequestData(model, apiKey, '', messagesForApi);
+
+    const response = isGemini ?
+      await fetch(geminiConfig.url, geminiConfig.data) :
+      await fetch(`${proxyUrl}/v1/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({
+          model: model,
+          messages: messagesForApi,
+          temperature: 0.8
+        })
+      });
+
+    if (!response.ok) throw new Error(`API 错误: ${response.statusText}`);
+
+    const data = await response.json();
+    const aiResponseContent = getGeminiResponseText(data);
+    const cleanedJson = aiResponseContent.replace(/^```json\s*/, '').replace(/```$/, '').trim();
+    const diaries = JSON.parse(cleanedJson);
+
+    chat.myPhoneDiaries = diaries;
+    await db.chats.put(chat);
+  } catch (error) {
+    console.error("生成MY Phone日记失败:", error);
+    throw error;
+  }
+}
+
+async function handleGenerateMyPhoneAmap() {
+  if (!activeMyPhoneCharacterId) return;
+  const chat = state.chats[activeMyPhoneCharacterId];
+  if (!chat) return;
+
+  const { proxyUrl, apiKey, model } = state.apiConfig;
+  if (!proxyUrl || !apiKey || !model) {
+    alert('请先在API设置中配置好API信息。');
+    return;
+  }
+
+  const userDisplayNameForAI = (state.qzoneSettings.nickname === '{{user}}' || !state.qzoneSettings.nickname) ? '用户' : state.qzoneSettings.nickname;
+  
+  const maxMemory = chat.settings.maxMemory || 10;
+  const recentHistory = chat.history.slice(-maxMemory).map(msg => 
+    `${msg.role === 'user' ? userDisplayNameForAI : chat.name}: ${String(msg.content).substring(0, 50)}...`
+  ).join('\n');
+  
+  const prompt = `你现在要扮演"${userDisplayNameForAI}"（也就是我），基于我与"${chat.name}"的对话历史，推测我的活动范围和生活轨迹，然后生成我的足迹记录。
+
+## 我与"${chat.name}"的最近对话：
+${recentHistory}
+
+## 任务：
+请基于以上对话推测我的特征，然后生成我最近的5-8条足迹记录。这些记录应该反映出我的生活区域、活动习惯和去过的地方。
+
+返回JSON格式：
+[
+  {
+    "name": "地点名称",
+    "address": "详细地址",
+    "time": "访问时间"
+  }
+]`;
+
+  try {
+    const messagesForApi = [{ role: 'user', content: prompt }];
+    let isGemini = proxyUrl.includes('generativelanguage');
+    let geminiConfig = toGeminiRequestData(model, apiKey, '', messagesForApi);
+
+    const response = isGemini ?
+      await fetch(geminiConfig.url, geminiConfig.data) :
+      await fetch(`${proxyUrl}/v1/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({
+          model: model,
+          messages: messagesForApi,
+          temperature: 0.8
+        })
+      });
+
+    if (!response.ok) throw new Error(`API 错误: ${response.statusText}`);
+
+    const data = await response.json();
+    const aiResponseContent = getGeminiResponseText(data);
+    const cleanedJson = aiResponseContent.replace(/^```json\s*/, '').replace(/```$/, '').trim();
+    const locations = JSON.parse(cleanedJson);
+
+    chat.myPhoneAmapHistory = locations;
+    await db.chats.put(chat);
+  } catch (error) {
+    console.error("生成MY Phone足迹失败:", error);
+    throw error;
+  }
+}
+
+async function handleGenerateMyPhoneAppUsage() {
+  if (!activeMyPhoneCharacterId) return;
+  const chat = state.chats[activeMyPhoneCharacterId];
+  if (!chat) return;
+
+  // 简单生成一些模拟的使用记录
+  const apps = ['qq', 'album', 'browser', 'taobao', 'memo', 'diary', 'amap', 'music', 'bilibili', 'reddit'];
+  const usageLog = [];
+  
+  for (let i = 0; i < 20; i++) {
+    const app = apps[Math.floor(Math.random() * apps.length)];
+    const date = new Date(Date.now() - Math.random() * 7 * 24 * 60 * 60 * 1000);
+    usageLog.push({
+      app: app,
+      timestamp: date.toISOString(),
+      date: date.toLocaleDateString('zh-CN'),
+      time: date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+    });
+  }
+
+  chat.myPhoneAppUsageLog = usageLog.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+  await db.chats.put(chat);
+}
+
+async function handleGenerateMyPhoneMusic() {
+  if (!activeMyPhoneCharacterId) return;
+  const chat = state.chats[activeMyPhoneCharacterId];
+  if (!chat) return;
+
+  const { proxyUrl, apiKey, model } = state.apiConfig;
+  if (!proxyUrl || !apiKey || !model) {
+    alert('请先在API设置中配置好API信息。');
+    return;
+  }
+
+  const userDisplayNameForAI = (state.qzoneSettings.nickname === '{{user}}' || !state.qzoneSettings.nickname) ? '用户' : state.qzoneSettings.nickname;
+  
+  const maxMemory = chat.settings.maxMemory || 10;
+  const recentHistory = chat.history.slice(-maxMemory).map(msg => 
+    `${msg.role === 'user' ? userDisplayNameForAI : chat.name}: ${String(msg.content).substring(0, 50)}...`
+  ).join('\n');
+  
+  const prompt = `你现在要扮演"${userDisplayNameForAI}"（也就是我），基于我与"${chat.name}"的对话历史，推测我的音乐品味和情感状态，然后生成我的音乐歌单。
+
+## 我与"${chat.name}"的最近对话：
+${recentHistory}
+
+## 任务：
+请基于以上对话推测我的特征，然后生成我的音乐歌单（5-8首歌）。这些歌曲应该反映出我的音乐偏好、情感状态和审美品味。
+
+返回JSON格式：
+[
+  {
+    "title": "歌曲名",
+    "artist": "歌手名"
+  }
+]`;
+
+  try {
+    const messagesForApi = [{ role: 'user', content: prompt }];
+    let isGemini = proxyUrl.includes('generativelanguage');
+    let geminiConfig = toGeminiRequestData(model, apiKey, '', messagesForApi);
+
+    const response = isGemini ?
+      await fetch(geminiConfig.url, geminiConfig.data) :
+      await fetch(`${proxyUrl}/v1/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({
+          model: model,
+          messages: messagesForApi,
+          temperature: 0.8
+        })
+      });
+
+    if (!response.ok) throw new Error(`API 错误: ${response.statusText}`);
+
+    const data = await response.json();
+    const aiResponseContent = getGeminiResponseText(data);
+    const cleanedJson = aiResponseContent.replace(/^```json\s*/, '').replace(/```$/, '').trim();
+    const playlist = JSON.parse(cleanedJson);
+
+    chat.myPhoneMusicPlaylist = playlist;
+    await db.chats.put(chat);
+  } catch (error) {
+    console.error("生成MY Phone音乐失败:", error);
+    throw error;
+  }
+}
+
+async function handleGenerateMyPhoneReddit() {
+  if (!activeMyPhoneCharacterId) return;
+  const chat = state.chats[activeMyPhoneCharacterId];
+  if (!chat) return;
+
+  const { proxyUrl, apiKey, model } = state.apiConfig;
+  if (!proxyUrl || !apiKey || !model) {
+    alert('请先在API设置中配置好API信息。');
+    return;
+  }
+
+  const userDisplayNameForAI = (state.qzoneSettings.nickname === '{{user}}' || !state.qzoneSettings.nickname) ? '用户' : state.qzoneSettings.nickname;
+  
+  const maxMemory = chat.settings.maxMemory || 10;
+  const recentHistory = chat.history.slice(-maxMemory).map(msg => 
+    `${msg.role === 'user' ? userDisplayNameForAI : chat.name}: ${String(msg.content).substring(0, 50)}...`
+  ).join('\n');
+  
+  const prompt = `你现在要扮演"${userDisplayNameForAI}"（也就是我），基于我与"${chat.name}"的对话历史，推测我的兴趣领域，然后生成我可能浏览的Reddit帖子。
+
+## 我与"${chat.name}"的最近对话：
+${recentHistory}
+
+## 任务：
+请基于以上对话推测我的特征，然后生成我可能浏览的5-8条Reddit帖子。
+
+返回JSON格式：
+[
+  {
+    "title": "帖子标题",
+    "subreddit": "子版块名",
+    "author": "作者名",
+    "score": 点赞数
+  }
+]`;
+
+  try {
+    const messagesForApi = [{ role: 'user', content: prompt }];
+    let isGemini = proxyUrl.includes('generativelanguage');
+    let geminiConfig = toGeminiRequestData(model, apiKey, '', messagesForApi);
+
+    const response = isGemini ?
+      await fetch(geminiConfig.url, geminiConfig.data) :
+      await fetch(`${proxyUrl}/v1/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({
+          model: model,
+          messages: messagesForApi,
+          temperature: 0.8
+        })
+      });
+
+    if (!response.ok) throw new Error(`API 错误: ${response.statusText}`);
+
+    const data = await response.json();
+    const aiResponseContent = getGeminiResponseText(data);
+    const cleanedJson = aiResponseContent.replace(/^```json\s*/, '').replace(/```$/, '').trim();
+    const posts = JSON.parse(cleanedJson);
+
+    chat.myPhoneRedditFeed = posts;
+    await db.chats.put(chat);
+  } catch (error) {
+    console.error("生成MY Phone Reddit失败:", error);
+    throw error;
+  }
+}
+
+async function handleGenerateMyPhoneBilibili() {
+  if (!activeMyPhoneCharacterId) return;
+  const chat = state.chats[activeMyPhoneCharacterId];
+  if (!chat) return;
+
+  const { proxyUrl, apiKey, model } = state.apiConfig;
+  if (!proxyUrl || !apiKey || !model) {
+    alert('请先在API设置中配置好API信息。');
+    return;
+  }
+
+  const userDisplayNameForAI = (state.qzoneSettings.nickname === '{{user}}' || !state.qzoneSettings.nickname) ? '用户' : state.qzoneSettings.nickname;
+  
+  const maxMemory = chat.settings.maxMemory || 10;
+  const recentHistory = chat.history.slice(-maxMemory).map(msg => 
+    `${msg.role === 'user' ? userDisplayNameForAI : chat.name}: ${String(msg.content).substring(0, 50)}...`
+  ).join('\n');
+  
+  const prompt = `你现在要扮演"${userDisplayNameForAI}"（也就是我），基于我与"${chat.name}"的对话历史，推测我的兴趣爱好，然后生成我可能观看的B站视频。
+
+## 我与"${chat.name}"的最近对话：
+${recentHistory}
+
+## 任务：
+请基于以上对话推测我的特征，然后生成我可能观看的5-8个B站视频。
+
+返回JSON格式：
+[
+  {
+    "title": "视频标题",
+    "author": "UP主名",
+    "views": 播放量,
+    "danmaku": 弹幕数
+  }
+]`;
+
+  try {
+    const messagesForApi = [{ role: 'user', content: prompt }];
+    let isGemini = proxyUrl.includes('generativelanguage');
+    let geminiConfig = toGeminiRequestData(model, apiKey, '', messagesForApi);
+
+    const response = isGemini ?
+      await fetch(geminiConfig.url, geminiConfig.data) :
+      await fetch(`${proxyUrl}/v1/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({
+          model: model,
+          messages: messagesForApi,
+          temperature: 0.8
+        })
+      });
+
+    if (!response.ok) throw new Error(`API 错误: ${response.statusText}`);
+
+    const data = await response.json();
+    const aiResponseContent = getGeminiResponseText(data);
+    const cleanedJson = aiResponseContent.replace(/^```json\s*/, '').replace(/```$/, '').trim();
+    const videos = JSON.parse(cleanedJson);
+
+    chat.myPhoneBilibiliVideos = videos;
+    await db.chats.put(chat);
+  } catch (error) {
+    console.error("生成MY Phone B站视频失败:", error);
+    throw error;
+  }
+}
+
   function renderCharMusicScreen() {
     const listEl = document.getElementById('char-music-list');
     listEl.innerHTML = '';
@@ -36470,7 +37472,7 @@ async function exportAppearanceSettings() {
 
 
   let currentPage = 0;
-  const totalPages = 2;
+  const totalPages = 3;
 
 
   function setupHomeScreenPagination() {
@@ -37159,7 +38161,7 @@ async function exportAppearanceSettings() {
 
 
   const DEFAULT_BUTTON_ORDER = [
-    'open-sticker-panel-btn', 'send-photo-btn', 'upload-image-btn',
+    'open-sticker-panel-btn', 'send-photo-btn', 'camera-capture-btn', 'upload-image-btn',
     'transfer-btn', 'voice-message-btn', 'send-waimai-request-btn',
     'video-call-btn', 'group-video-call-btn', 'send-poll-btn',
     'share-link-btn', 'share-location-btn', 'gomoku-btn',
@@ -37171,7 +38173,6 @@ async function exportAppearanceSettings() {
     'open-nai-gallery-btn',
     'open-todo-list-btn',
     'open-quick-reply-btn',
-    'character-monitor-btn',
     'stop-api-call-btn'
   ];
 
@@ -43724,6 +44725,1226 @@ window.closeCharBilibiliPlayer = function() {
     }
     switchToCharScreen('char-bilibili-screen');
 }
+
+// ==========================================
+// MY Phone 渲染函数
+// ==========================================
+
+async function renderMyPhoneSimulatedQQ() {
+  const listEl = document.getElementById('myphone-chat-list');
+  listEl.innerHTML = '';
+  const char = state.chats[activeMyPhoneCharacterId];
+  if (!char) return;
+
+  const userDisplayName = state.qzoneSettings.nickname || '我';
+  const lastRealMessage = char.history.filter(m => !m.isHidden).slice(-1)[0] || { content: '...' };
+
+  let lastMsgContent = '...';
+  if (lastRealMessage) {
+    if (typeof lastRealMessage.content === 'string') {
+      lastMsgContent = lastRealMessage.content;
+    } else if (Array.isArray(lastRealMessage.content) && lastRealMessage.content[0]?.type === 'image_url') {
+      lastMsgContent = '[图片]';
+    } else if (lastRealMessage.type) {
+      const typeMap = {
+        'voice_message': '[语音]',
+        'transfer': '[转账]',
+        'ai_image': '[图片]'
+      };
+      lastMsgContent = typeMap[lastRealMessage.type] || `[${lastRealMessage.type}]`;
+    }
+  }
+
+  const charAvatar = char.settings.aiAvatar || defaultAvatar;
+  const charFrame = char.settings.aiAvatarFrame || '';
+  let avatarHtml;
+  if (charFrame) {
+    avatarHtml = `<div class="avatar-group has-frame" style="width: 45px; height: 45px;"><div class="avatar-with-frame" style="width: 45px; height: 45px;"><img src="${charAvatar}" class="avatar-img" style="border-radius: 50%;"><img src="${charFrame}" class="avatar-frame"></div></div>`;
+  } else {
+    avatarHtml = `<div class="avatar-group" style="width: 45px; height: 45px;"><img src="${charAvatar}" class="avatar" style="border-radius: 50%; width: 45px; height: 45px;"></div>`;
+  }
+
+  const charChatItem = document.createElement('div');
+  charChatItem.className = 'chat-list-item';
+  charChatItem.dataset.conversationIndex = "-1";
+  charChatItem.innerHTML = `
+      ${avatarHtml}
+      <div class="info">
+          <div class="name-line">
+              <span class="name">${char.name}</span>
+          </div>
+          <div class="last-msg">${String(lastMsgContent).substring(0, 20)}...</div>
+      </div>
+  `;
+  charChatItem.addEventListener('click', () => openMyPhoneConversation(-1));
+  listEl.appendChild(charChatItem);
+
+  const simulatedConversations = char.myPhoneSimulatedQQConversations || [];
+  simulatedConversations.forEach((conv, idx) => {
+    const item = document.createElement('div');
+    item.className = 'chat-list-item';
+    item.dataset.conversationIndex = idx;
+    item.innerHTML = `
+      <img src="${conv.avatar || defaultAvatar}" class="avatar">
+      <div class="info">
+        <div class="name-line">
+          <span class="name">${conv.name}</span>
+        </div>
+        <div class="last-msg">${conv.lastMessage || '...'}</div>
+      </div>
+    `;
+    item.addEventListener('click', () => openMyPhoneConversation(idx));
+    listEl.appendChild(item);
+  });
+
+  document.getElementById('back-to-myphone-qq-list-btn').onclick = () => switchToMyPhoneScreen('myphone-qq-screen');
+}
+
+async function openMyPhoneConversation(index) {
+  const char = state.chats[activeMyPhoneCharacterId];
+  if (!char) return;
+
+  // 保存当前对话索引
+  window.currentMyPhoneConversationIndex = index;
+
+  const messagesEl = document.getElementById('myphone-conversation-messages');
+  messagesEl.innerHTML = '';
+  
+  // 设置背景色和padding
+  const isDarkMode = document.getElementById('phone-screen').classList.contains('dark-mode');
+  messagesEl.style.backgroundColor = isDarkMode ? '#000000' : '#f0f2f5';
+  messagesEl.style.padding = '10px';
+  messagesEl.dataset.theme = char.settings.theme || 'default';
+
+  let partnerName, messages, tempChatObject;
+  const settingsBtn = document.getElementById('myphone-conversation-settings-btn');
+  
+  if (index === -1) {
+    // 与角色的真实对话 - 不显示设置按钮
+    partnerName = char.name;
+    settingsBtn.style.display = 'none';
+    
+    // 创建临时聊天对象用于渲染（角色视角）
+    tempChatObject = {
+      id: 'temp_myphone_user_chat',
+      isGroup: false,
+      name: state.qzoneSettings.nickname || '我',
+      settings: {
+        ...char.settings,
+        myAvatar: char.settings.myAvatar || defaultAvatar,
+        myAvatarFrame: char.settings.myAvatarFrame || '',
+        aiAvatar: char.settings.aiAvatar || defaultAvatar,
+        aiAvatarFrame: char.settings.aiAvatarFrame || ''
+      }
+    };
+    
+    messages = char.history.filter(m => !m.isHidden);
+  } else {
+    // 模拟对话 - 显示设置按钮
+    const conv = char.myPhoneSimulatedQQConversations[index];
+    partnerName = conv.name;
+    settingsBtn.style.display = 'block';
+    
+    // 获取用户头像（从主屏幕QQ对话中的设置）
+    const userAvatar = char.settings.myAvatar || state.qzoneSettings.avatar || defaultAvatar;
+    const userAvatarFrame = char.settings.myAvatarFrame || '';
+    
+    // 创建临时聊天对象用于渲染
+    tempChatObject = {
+      id: 'temp_myphone_simulated_chat',
+      isGroup: false,
+      name: conv.name,
+      settings: {
+        myAvatar: userAvatar,
+        myAvatarFrame: userAvatarFrame,
+        aiAvatar: conv.avatar || defaultAvatar,
+        aiAvatarFrame: ''
+      }
+    };
+    
+    messages = conv.messages || [];
+  }
+
+  document.getElementById('myphone-conversation-partner-name').textContent = partnerName;
+
+  // 使用createMessageElement渲染每条消息
+  for (const msg of messages) {
+    const messageEl = await createMessageElement(msg, tempChatObject);
+    if (messageEl) {
+      // 添加底部间距
+      messageEl.style.marginBottom = '10px';
+      messagesEl.appendChild(messageEl);
+    }
+  }
+
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+  switchToMyPhoneScreen('myphone-qq-conversation-screen');
+}
+
+async function renderMyPhoneAlbum() {
+  const gridEl = document.getElementById('myphone-album-grid');
+  gridEl.innerHTML = '';
+  if (!activeMyPhoneCharacterId) return;
+  const char = state.chats[activeMyPhoneCharacterId];
+
+  const photos = char.myPhoneAlbum || [];
+
+  if (photos.length === 0) {
+    gridEl.innerHTML = '<p style="text-align:center; color: var(--text-secondary); padding: 50px 0;">我的相册还是空的，<br>点击右上角刷新按钮生成一些照片吧！</p>';
+    return;
+  }
+
+  const fallbackImageUrl = `https://i.postimg.cc/KYr2qRCK/1.jpg`;
+
+  photos.forEach(photo => {
+    const item = document.createElement('div');
+    item.className = 'char-photo-item';
+    item.dataset.description = photo.description;
+    gridEl.appendChild(item);
+
+    if (state.globalSettings.enableAiDrawing) {
+      item.style.backgroundColor = '#e9ecef';
+      const containsNonEnglish = /[^\x00-\x7F]/.test(photo.image_prompt);
+      const isValidPrompt = photo.image_prompt && photo.image_prompt.trim() && !containsNonEnglish;
+      const finalPrompt = isValidPrompt ? photo.image_prompt : 'a beautiful scenery, anime style, cinematic lighting';
+      const imageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(finalPrompt)}`;
+
+      const img = new Image();
+      img.onload = function() {
+        item.style.backgroundImage = `url(${this.src})`;
+      };
+      img.onerror = function() {
+        item.style.backgroundImage = `url(${fallbackImageUrl})`;
+      };
+      img.src = imageUrl;
+    } else {
+      item.style.backgroundColor = '#f0f2f5';
+      item.style.border = '1px solid #e0e0e0';
+      const descriptionEl = document.createElement('p');
+      descriptionEl.className = 'char-photo-description';
+      descriptionEl.textContent = photo.description || '(这张照片没有描述)';
+      item.appendChild(descriptionEl);
+    }
+
+    item.addEventListener('click', () => {
+      showCustomAlert('照片描述', photo.description || '无描述');
+    });
+  });
+}
+
+function renderMyPhoneBrowserHistory() {
+  const listEl = document.getElementById('myphone-browser-list');
+  listEl.innerHTML = '';
+  if (!activeMyPhoneCharacterId) return;
+
+  const char = state.chats[activeMyPhoneCharacterId];
+  const history = char.myPhoneBrowserHistory || [];
+
+  if (history.length === 0) {
+    listEl.innerHTML = '<p style="text-align:center; color: var(--text-secondary); padding: 50px 0;">我的浏览器空空如也，<br>点击右上角刷新按钮生成一些记录吧！</p>';
+    return;
+  }
+
+  const globeIcon = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>`;
+  const arrowIcon = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>`;
+
+  history.forEach((item, index) => {
+    const entryEl = document.createElement('div');
+    entryEl.className = 'char-browser-item';
+    
+    let cleanUrl = item.url.replace(/^https?:\/\//, '').replace(/^www\./, '');
+    if(cleanUrl.length > 25) cleanUrl = cleanUrl.substring(0, 25) + '...';
+
+    entryEl.innerHTML = `
+        <div class="char-browser-icon-box">
+            ${globeIcon}
+        </div>
+        <div class="char-browser-content">
+            <div class="char-browser-title">${item.title}</div>
+            <div class="char-browser-url">${cleanUrl}</div>
+        </div>
+        <div class="char-browser-arrow">
+            ${arrowIcon}
+        </div>
+    `;
+
+    entryEl.addEventListener('click', () => openMyPhoneArticle(index));
+    listEl.appendChild(entryEl);
+  });
+
+  document.getElementById('back-to-myphone-browser-list-btn').onclick = () => switchToMyPhoneScreen('myphone-browser-screen');
+}
+
+async function openMyPhoneArticle(index) {
+  const char = state.chats[activeMyPhoneCharacterId];
+  const articleData = char.myPhoneBrowserHistory[index];
+  if (!articleData) return;
+
+  renderMyPhoneArticle(articleData);
+  switchToMyPhoneScreen('myphone-browser-article-screen');
+}
+
+function renderMyPhoneArticle(articleData) {
+  document.getElementById('myphone-article-title-header').textContent = articleData.title.substring(0, 10) + '...';
+  document.getElementById('myphone-article-title').textContent = articleData.title;
+  document.getElementById('myphone-article-meta').textContent = articleData.url;
+  document.getElementById('myphone-article-content').textContent = articleData.content || '内容加载中...';
+}
+
+function renderMyPhoneTaobao() {
+  const gridEl = document.getElementById('myphone-taobao-grid');
+  gridEl.innerHTML = '';
+  if (!activeMyPhoneCharacterId) return;
+
+  const char = state.chats[activeMyPhoneCharacterId];
+  const items = char.myPhoneTaobaoHistory || [];
+
+  if (items.length === 0) {
+    gridEl.innerHTML = '<p style="text-align:center; color: var(--text-secondary); padding: 50px 0;">我的淘宝空空如也，<br>点击右上角刷新按钮生成一些记录吧！</p>';
+    return;
+  }
+
+  items.forEach(item => {
+    const itemEl = document.createElement('div');
+    itemEl.className = 'char-product-item';
+    itemEl.dataset.reason = item.reason || item.thought;
+
+    let imageOrTextHtml;
+    // 如果用户选择了使用AI生成图片
+    if (item.image_prompt && !item.useDefaultImage && state.globalSettings.enableAiDrawing) {
+      const imageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(item.image_prompt)}`;
+      imageOrTextHtml = `<img src="${imageUrl}" class="product-image">`;
+    } else if (item.image_prompt && !item.useDefaultImage) {
+      // 用户选择了AI生成但全局设置未启用，显示描述
+      imageOrTextHtml = `
+        <div class="char-product-description-overlay">
+          <p class="char-photo-description">${item.thought || item.reason || '(无购买理由)'}</p>
+        </div>
+      `;
+    } else {
+      // 用户选择了使用默认图片
+      imageOrTextHtml = `
+        <div class="char-product-description-overlay">
+          <p class="char-photo-description">${item.thought || item.reason || '(无购买理由)'}</p>
+        </div>
+      `;
+    }
+
+    itemEl.innerHTML = `
+      ${imageOrTextHtml}
+      <div class="product-info">
+        <div class="product-name">${item.name}</div>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 8px;">
+          <div class="product-price">¥${(parseFloat(item.price) || 0).toFixed(2)}</div>
+          <div class="char-product-status">${item.status || '已签收'}</div>
+        </div>
+      </div>
+    `;
+
+    // 添加点击事件显示购买想法
+    itemEl.addEventListener('click', () => {
+      const thought = item.thought || item.reason || '无想法记录';
+      showCustomAlert('购买想法', thought);
+    });
+
+    gridEl.appendChild(itemEl);
+  });
+}
+
+function renderMyPhoneMemoList() {
+  const listEl = document.getElementById('myphone-memo-list');
+  listEl.innerHTML = '';
+  const char = state.chats[activeMyPhoneCharacterId];
+  const memos = (char.myPhoneMemos || []).slice().reverse();
+
+  if (memos.length === 0) {
+    listEl.innerHTML = '<p style="text-align:center; color: var(--text-secondary); padding: 50px 0;">我的备忘录空空如也，<br>点击右上角+号添加或刷新按钮生成！</p>';
+    return;
+  }
+
+  // SVG 图标: 类似文件的图标
+  const memoIconSVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>`;
+  // SVG 图标: 右箭头
+  const arrowIcon = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>`;
+
+  memos.forEach((memo, index) => {
+    const item = document.createElement('div');
+    item.className = 'memo-item';
+    
+    // 获取内容预览 (第一行)
+    const previewText = (memo.content || '').split('\n')[0].substring(0, 50) || '无内容';
+
+    item.innerHTML = `
+      <div class="cphone-item-icon-box memo-icon-style">
+        ${memoIconSVG}
+      </div>
+      <div class="cphone-item-info">
+        <div class="cphone-item-title">${memo.title}</div>
+        <div class="cphone-item-preview">${previewText}</div>
+      </div>
+      <div class="cphone-item-arrow">
+        ${arrowIcon}
+      </div>
+    `;
+    
+    item.addEventListener('click', () => openMyPhoneMemo(memos.length - 1 - index));
+    listEl.appendChild(item);
+  });
+
+  document.getElementById('back-to-myphone-memo-list-btn').onclick = () => switchToMyPhoneScreen('myphone-memo-screen');
+}
+
+function openMyPhoneMemo(index) {
+  const char = state.chats[activeMyPhoneCharacterId];
+  const memo = char.myPhoneMemos[index];
+  if (!memo) return;
+
+  document.getElementById('myphone-memo-title-header').textContent = memo.title.substring(0, 10) + '...';
+  document.getElementById('myphone-memo-detail-title').textContent = memo.title;
+  document.getElementById('myphone-memo-detail-date').textContent = memo.date;
+  document.getElementById('myphone-memo-detail-content').textContent = memo.content;
+
+  switchToMyPhoneScreen('myphone-memo-detail-screen');
+}
+
+function renderMyPhoneDiaryList() {
+  const listEl = document.getElementById('myphone-diary-list');
+  listEl.innerHTML = '';
+  const char = state.chats[activeMyPhoneCharacterId];
+  const diaries = (char.myPhoneDiaries || []).slice().reverse();
+
+  if (diaries.length === 0) {
+    listEl.innerHTML = '<p style="text-align:center; color: var(--text-secondary); padding: 50px 0;">我的日记空空如也，<br>点击右上角刷新按钮生成一些内容吧！</p>';
+    return;
+  }
+
+  // SVG 图标: 书本图标
+  const diaryIconSVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg>`;
+  // SVG 图标: 右箭头
+  const arrowIcon = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>`;
+
+  diaries.forEach((diary, index) => {
+    const item = document.createElement('div');
+    item.className = 'diary-item';
+    
+    // 使用diary.date作为日期显示
+    const dateStr = diary.date || new Date().toLocaleDateString('zh-CN');
+
+    item.innerHTML = `
+      <div class="cphone-item-icon-box diary-icon-style">
+        ${diaryIconSVG}
+      </div>
+      <div class="cphone-item-info">
+        <div class="cphone-item-title">${diary.title}</div>
+        <div class="cphone-item-preview">${dateStr}</div>
+      </div>
+      <div class="cphone-item-arrow">
+        ${arrowIcon}
+      </div>
+    `;
+    item.addEventListener('click', () => openMyPhoneDiary(diaries.length - 1 - index));
+    listEl.appendChild(item);
+  });
+
+  document.getElementById('back-to-myphone-diary-list-btn').onclick = () => switchToMyPhoneScreen('myphone-diary-screen');
+}
+
+function openMyPhoneDiary(index) {
+  const char = state.chats[activeMyPhoneCharacterId];
+  const diary = char.myPhoneDiaries[index];
+  if (!diary) return;
+
+  document.getElementById('myphone-diary-title-header').textContent = diary.title.substring(0, 10) + '...';
+  document.getElementById('myphone-diary-detail-title').textContent = diary.title;
+  document.getElementById('myphone-diary-detail-date').textContent = diary.date;
+  
+  // 显示天气
+  const weatherEl = document.getElementById('myphone-diary-detail-weather');
+  if (weatherEl) {
+    weatherEl.textContent = diary.weather ? `天气：${diary.weather}` : '';
+    weatherEl.style.display = diary.weather ? 'block' : 'none';
+  }
+  
+  // 显示前言
+  const prefaceEl = document.getElementById('myphone-diary-detail-preface');
+  if (prefaceEl) {
+    prefaceEl.textContent = diary.preface || '';
+    prefaceEl.style.display = diary.preface ? 'block' : 'none';
+  }
+  
+  document.getElementById('myphone-diary-detail-content').textContent = diary.content;
+
+  switchToMyPhoneScreen('myphone-diary-detail-screen');
+}
+
+function renderMyPhoneAmap() {
+  const listEl = document.getElementById('myphone-amap-list');
+  listEl.innerHTML = '';
+  if (!activeMyPhoneCharacterId) return;
+
+  const char = state.chats[activeMyPhoneCharacterId];
+  const locations = char.myPhoneAmapHistory || [];
+
+  if (locations.length === 0) {
+    listEl.innerHTML = '<p style="text-align:center; color: var(--text-secondary); padding: 50px 0;">我的足迹空空如也，<br>点击右上角刷新按钮生成一些记录吧！</p>';
+    return;
+  }
+
+  locations.forEach(item => {
+    const itemEl = document.createElement('div');
+    itemEl.className = 'char-amap-item';
+
+    // 兼容新旧数据结构
+    const locationName = item.locationName || item.name || '未知地点';
+    const address = item.address || '';
+    const comment = item.comment || item.thought || '';
+    const timeAgo = item.timeAgo || item.time || '某个时间';
+
+    let photoHtml = '';
+    if (item.image_prompt) {
+      const imageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(item.image_prompt)}`;
+      photoHtml = `<div class="amap-item-photo" style="background-image: url('${imageUrl}')" data-comment="${comment}"></div>`;
+    }
+
+    itemEl.innerHTML = `
+      <div class="amap-item-header">
+        <div class="amap-item-icon">📍</div>
+        <div class="amap-item-info">
+          <div class="amap-item-title">${locationName}</div>
+          <div class="amap-item-address">${address}</div>
+        </div>
+      </div>
+      <div class="amap-item-body">
+        <div class="amap-item-comment">${comment.replace(/\n/g, '<br>')}</div>
+        ${photoHtml}
+      </div>
+      <div class="amap-item-footer">${timeAgo}</div>
+    `;
+    
+    listEl.appendChild(itemEl);
+  });
+}
+
+function renderMyPhoneAppUsage() {
+  const listEl = document.getElementById('myphone-usage-list');
+  listEl.innerHTML = '';
+  if (!activeMyPhoneCharacterId) return;
+
+  const char = state.chats[activeMyPhoneCharacterId];
+  const usageData = (char.myPhoneAppUsage || []).sort((a, b) => b.usageTimeMinutes - a.usageTimeMinutes);
+
+  if (usageData.length === 0) {
+    listEl.innerHTML = '<p style="text-align:center; color: var(--text-secondary); padding: 50px 0;">暂无使用记录，<br>点击右上角+号添加或刷新按钮生成！</p>';
+    return;
+  }
+
+  usageData.forEach(item => {
+    const itemEl = document.createElement('div');
+    itemEl.className = 'char-usage-item';
+
+    // 计算时长显示
+    const hours = Math.floor(item.usageTimeMinutes / 60);
+    const minutes = item.usageTimeMinutes % 60;
+    let timeString = '';
+    if (hours > 0) timeString += `${hours}小时`;
+    if (minutes > 0) timeString += `${minutes}分钟`;
+    if (!timeString) timeString = '小于1分钟';
+
+    // 图标处理：如果用户提供了iconUrl就用用户的，否则用默认图标
+    let iconHtml = '';
+    if (item.iconUrl) {
+      iconHtml = `<img src="${item.iconUrl}" class="usage-item-icon">`;
+    } else {
+      // 使用默认灰色图标占位
+      iconHtml = `<div class="usage-item-icon" style="background-color: #e0e0e0; display: flex; align-items: center; justify-content: center; color: #999; font-size: 20px;">📱</div>`;
+    }
+
+    itemEl.innerHTML = `
+      ${iconHtml}
+      <div class="usage-item-info">
+        <div class="usage-item-name">${item.appName}</div>
+        <div class="usage-item-category">${item.category}</div>
+      </div>
+      <div class="usage-item-time">${timeString}</div>
+    `;
+    
+    listEl.appendChild(itemEl);
+  });
+}
+
+function renderMyPhoneMusicScreen() {
+  const listEl = document.getElementById('myphone-music-list');
+  listEl.innerHTML = '';
+  if (!activeMyPhoneCharacterId) return;
+
+  const char = state.chats[activeMyPhoneCharacterId];
+  const playlist = char.myPhoneMusicPlaylist || [];
+
+  if (playlist.length === 0) {
+    listEl.innerHTML = '<p style="text-align:center; color: var(--text-secondary); padding: 50px 0;">我的歌单空空如也，<br>点击右上角+号添加或刷新按钮生成！</p>';
+    return;
+  }
+
+  playlist.forEach((track, index) => {
+    const itemEl = document.createElement('div');
+    itemEl.className = 'char-music-item';
+    
+    // 处理封面图，如果没有封面则使用默认图
+    const coverUrl = track.cover || 'https://via.placeholder.com/60x60/cccccc/666666?text=Music';
+    
+    itemEl.innerHTML = `
+      <img src="${coverUrl}" class="music-item-cover">
+      <div class="music-item-info">
+        <div class="music-item-name">${track.name || track.title || '未知歌曲'}</div>
+        <div class="music-item-artist">${track.artist || '未知歌手'}</div>
+      </div>
+    `;
+
+    // 使用CPhone的播放器播放MYphone的歌曲
+    itemEl.addEventListener('click', () => playMyPhoneSong(index, playlist));
+    listEl.appendChild(itemEl);
+  });
+}
+
+// MY Phone 音乐播放函数 - 使用CPhone的播放器
+function playMyPhoneSong(songIndex, playlist) {
+  const player = document.getElementById('char-audio-player');
+  const modal = document.getElementById('char-music-player-modal');
+
+  if (charPlayerState.lrcUpdateInterval) clearInterval(charPlayerState.lrcUpdateInterval);
+  player.pause();
+
+  // 设置播放状态
+  charPlayerState.currentPlaylist = playlist;
+  charPlayerState.currentIndex = songIndex;
+
+  const songObject = playlist[songIndex];
+  if (!songObject) {
+    console.error("playMyPhoneSong: 歌曲索引无效或歌单为空。");
+    return;
+  }
+
+  // 兼容新旧数据结构
+  const songName = songObject.name || songObject.title || '未知歌曲';
+  const songArtist = songObject.artist || '未知歌手';
+  const songCover = songObject.cover || 'https://via.placeholder.com/300x300/cccccc/666666?text=Music';
+  const songSrc = songObject.src || songObject.url || '';
+
+  // 更新播放器界面
+  document.getElementById('char-music-player-title').textContent = songName;
+  document.getElementById('char-music-artist').textContent = songArtist;
+  document.getElementById('char-music-cover').src = songCover;
+
+  // 解析歌词
+  charPlayerState.parsedLyrics = parseLRC(songObject.lrcContent || "");
+  renderCharLyrics();
+
+  // 播放音频
+  if (songObject.isLocal) {
+    // 本地文件处理
+    const blob = new Blob([songObject.src], {
+      type: songObject.fileType || 'audio/mpeg'
+    });
+    player.src = URL.createObjectURL(blob);
+  } else if (songSrc) {
+    player.src = songSrc;
+  } else {
+    showCustomAlert('错误', '该歌曲没有可播放的音源');
+    return;
+  }
+
+  player.play().catch(e => {
+    console.error("音频播放失败:", e);
+    showCustomAlert('播放失败', '无法播放此音频文件');
+  });
+
+  player.onloadedmetadata = () => {
+    const duration = player.duration;
+    if (isFinite(duration)) {
+      document.getElementById('char-music-total-time').textContent = formatTime(duration);
+      document.getElementById('char-music-progress-bar').max = duration;
+    }
+  };
+
+  // 显示播放器
+  modal.classList.add('visible');
+  charPlayerState.isPlaying = true;
+  updateCharPlayButton();
+
+  // 启动歌词同步
+  charPlayerState.lrcUpdateInterval = setInterval(() => {
+    const currentTime = player.currentTime;
+    updateCharLyricHighlight(currentTime);
+    document.getElementById('char-music-current-time').textContent = formatTime(currentTime);
+    document.getElementById('char-music-progress-bar').value = currentTime;
+  }, 100);
+}
+
+function renderMyPhoneRedditList(posts) {
+  const listEl = document.getElementById('myphone-reddit-list');
+  listEl.innerHTML = '';
+
+  if (!posts || posts.length === 0) {
+    listEl.innerHTML = '<p style="text-align:center; color: var(--text-secondary); padding: 50px 0;">暂无内容</p>';
+    return;
+  }
+
+  posts.forEach(post => {
+    const item = document.createElement('div');
+    item.className = 'char-reddit-item';
+    item.innerHTML = `
+      <div class="reddit-title">${post.title}</div>
+      <div class="reddit-subreddit">r/${post.subreddit || 'unknown'}</div>
+      <div class="reddit-meta">${post.author || 'anonymous'} · ${post.score || 0} upvotes</div>
+    `;
+    listEl.appendChild(item);
+  });
+}
+
+function handleMyPhoneRedditSearch(query) {
+  // Placeholder for Reddit search functionality
+  console.log('MY Phone Reddit search:', query);
+}
+
+function renderMyPhoneBilibiliScreen() {
+  const listEl = document.getElementById('myphone-bilibili-list');
+  listEl.innerHTML = '';
+  if (!activeMyPhoneCharacterId) return;
+
+  const char = state.chats[activeMyPhoneCharacterId];
+  const videos = char.myPhoneBilibiliVideos || [];
+
+  if (videos.length === 0) {
+    listEl.innerHTML = '<p style="text-align:center; color: var(--text-secondary); padding: 50px 0;">我的B站空空如也，<br>点击右上角刷新按钮生成一些视频吧！</p>';
+    return;
+  }
+
+  videos.forEach(video => {
+    const item = document.createElement('div');
+    item.className = 'char-bilibili-item';
+    item.innerHTML = `
+      <div class="bilibili-title">${video.title}</div>
+      <div class="bilibili-author">${video.author || 'UP主'}</div>
+      <div class="bilibili-stats">${video.views || 0}播放 · ${video.danmaku || 0}弹幕</div>
+    `;
+    listEl.appendChild(item);
+  });
+}
+
+function closeMyPhoneBilibiliPlayer() {
+  const videoEl = document.getElementById('myphone-bilibili-video');
+  if(videoEl) {
+    videoEl.pause();
+    videoEl.src = '';
+  }
+  switchToMyPhoneScreen('myphone-bilibili-screen');
+}
+
+window.closeMyPhoneBilibiliPlayer = closeMyPhoneBilibiliPlayer;
+
+// MY Phone 手动添加功能函数
+async function saveMyPhoneAlbum() {
+  const description = document.getElementById('myphone-album-description-input')?.value?.trim();
+  
+  if (!description) {
+    showCustomAlert('错误', '请输入图片描述');
+    return;
+  }
+  
+  if (!activeMyPhoneCharacterId) {
+    showCustomAlert('错误', '未选择角色');
+    return;
+  }
+  
+  const char = state.chats[activeMyPhoneCharacterId];
+  if (!char.myPhoneAlbum) {
+    char.myPhoneAlbum = [];
+  }
+  
+  const newPhoto = {
+    description: description,
+    image_prompt: description,
+    date: new Date().toLocaleDateString('zh-CN')
+  };
+  
+  char.myPhoneAlbum.unshift(newPhoto);
+  await db.chats.put(char);
+  renderMyPhoneAlbum();
+  
+  document.getElementById('myphone-add-album-modal')?.classList.remove('visible');
+  document.getElementById('myphone-album-description-input').value = '';
+  showCustomAlert('成功', '照片已添加');
+}
+
+async function saveMyPhoneBrowser() {
+  const title = document.getElementById('myphone-browser-title-input')?.value?.trim();
+  const content = document.getElementById('myphone-browser-content-input')?.value?.trim();
+  
+  if (!title || !content) {
+    showCustomAlert('错误', '请填写标题和内容');
+    return;
+  }
+  
+  if (!activeMyPhoneCharacterId) {
+    showCustomAlert('错误', '未选择角色');
+    return;
+  }
+  
+  const char = state.chats[activeMyPhoneCharacterId];
+  if (!char.myPhoneBrowserHistory) {
+    char.myPhoneBrowserHistory = [];
+  }
+  
+  const newEntry = {
+    title: title,
+    url: 'www.example.com',
+    content: content,
+    date: new Date().toLocaleDateString('zh-CN')
+  };
+  
+  char.myPhoneBrowserHistory.unshift(newEntry);
+  await db.chats.put(char);
+  renderMyPhoneBrowserHistory();
+  
+  document.getElementById('myphone-add-browser-modal')?.classList.remove('visible');
+  document.getElementById('myphone-browser-title-input').value = '';
+  document.getElementById('myphone-browser-content-input').value = '';
+  showCustomAlert('成功', '浏览记录已添加');
+}
+
+async function saveMyPhoneTaobao() {
+  const name = document.getElementById('myphone-taobao-name-input')?.value?.trim();
+  const description = document.getElementById('myphone-taobao-description-input')?.value?.trim();
+  const thought = document.getElementById('myphone-taobao-thought-input')?.value?.trim();
+  const price = document.getElementById('myphone-taobao-price-input')?.value || '99';
+  const status = document.getElementById('myphone-taobao-status-input')?.value?.trim() || '已签收';
+  const useAI = document.getElementById('myphone-taobao-ai-image-checkbox')?.checked;
+  
+  if (!name || !description) {
+    showCustomAlert('错误', '请填写商品名称和描述');
+    return;
+  }
+  
+  if (!activeMyPhoneCharacterId) {
+    showCustomAlert('错误', '未选择角色');
+    return;
+  }
+  
+  const char = state.chats[activeMyPhoneCharacterId];
+  if (!char.myPhoneTaobaoHistory) {
+    char.myPhoneTaobaoHistory = [];
+  }
+  
+  const newItem = {
+    name: name,
+    price: price,
+    status: status,
+    date: new Date().toLocaleDateString('zh-CN'),
+    reason: thought || description,
+    thought: thought || '',
+    image_prompt: useAI ? description : null,
+    useDefaultImage: !useAI
+  };
+  
+  char.myPhoneTaobaoHistory.unshift(newItem);
+  await db.chats.put(char);
+  renderMyPhoneTaobao();
+  
+  document.getElementById('myphone-add-taobao-modal')?.classList.remove('visible');
+  document.getElementById('myphone-taobao-name-input').value = '';
+  document.getElementById('myphone-taobao-description-input').value = '';
+  document.getElementById('myphone-taobao-thought-input').value = '';
+  document.getElementById('myphone-taobao-price-input').value = '99';
+  document.getElementById('myphone-taobao-status-input').value = '已签收';
+  document.getElementById('myphone-taobao-ai-image-checkbox').checked = false;
+  showCustomAlert('成功', '购物记录已添加');
+}
+
+async function saveMyPhoneDiary() {
+  const date = document.getElementById('myphone-diary-date-input')?.value;
+  const weather = document.getElementById('myphone-diary-weather-input')?.value?.trim();
+  const title = document.getElementById('myphone-diary-title-input')?.value?.trim();
+  const preface = document.getElementById('myphone-diary-preface-input')?.value?.trim();
+  const content = document.getElementById('myphone-diary-content-input')?.value?.trim();
+  
+  if (!date || !title || !content) {
+    showCustomAlert('错误', '请填写日期、标题和内容');
+    return;
+  }
+  
+  if (!activeMyPhoneCharacterId) {
+    showCustomAlert('错误', '未选择角色');
+    return;
+  }
+  
+  const char = state.chats[activeMyPhoneCharacterId];
+  if (!char.myPhoneDiaries) {
+    char.myPhoneDiaries = [];
+  }
+  
+  const formattedDate = new Date(date).toLocaleDateString('zh-CN', { 
+    year: 'numeric', 
+    month: 'long', 
+    day: 'numeric' 
+  });
+  
+  const newDiary = {
+    date: formattedDate,
+    weather: weather || '晴',
+    title: title,
+    preface: preface || '',
+    content: content
+  };
+  
+  char.myPhoneDiaries.unshift(newDiary);
+  await db.chats.put(char);
+  renderMyPhoneDiaryList();
+  
+  document.getElementById('myphone-add-diary-modal')?.classList.remove('visible');
+  document.getElementById('myphone-diary-date-input').value = '';
+  document.getElementById('myphone-diary-weather-input').value = '';
+  document.getElementById('myphone-diary-title-input').value = '';
+  document.getElementById('myphone-diary-preface-input').value = '';
+  document.getElementById('myphone-diary-content-input').value = '';
+  showCustomAlert('成功', '日记已添加');
+}
+
+async function saveMyPhoneMemo() {
+  const title = document.getElementById('myphone-memo-title-input')?.value?.trim();
+  const content = document.getElementById('myphone-memo-content-input')?.value?.trim();
+  
+  if (!title || !content) {
+    showCustomAlert('错误', '请填写标题和内容');
+    return;
+  }
+  
+  if (!activeMyPhoneCharacterId) {
+    showCustomAlert('错误', '未选择角色');
+    return;
+  }
+  
+  const char = state.chats[activeMyPhoneCharacterId];
+  if (!char.myPhoneMemos) {
+    char.myPhoneMemos = [];
+  }
+  
+  const newMemo = {
+    title: title,
+    content: content,
+    date: new Date().toLocaleDateString('zh-CN')
+  };
+  
+  char.myPhoneMemos.unshift(newMemo);
+  await db.chats.put(char);
+  renderMyPhoneMemoList();
+  
+  document.getElementById('myphone-add-memo-modal')?.classList.remove('visible');
+  document.getElementById('myphone-memo-title-input').value = '';
+  document.getElementById('myphone-memo-content-input').value = '';
+  showCustomAlert('成功', '备忘录已添加');
+}
+
+async function saveMyPhoneAmap() {
+  const location = document.getElementById('myphone-amap-location-input')?.value?.trim();
+  const address = document.getElementById('myphone-amap-address-input')?.value?.trim();
+  const thought = document.getElementById('myphone-amap-thought-input')?.value?.trim();
+  const timeInput = document.getElementById('myphone-amap-time-input')?.value?.trim();
+  
+  if (!location) {
+    showCustomAlert('错误', '请填写地点');
+    return;
+  }
+  
+  if (!activeMyPhoneCharacterId) {
+    showCustomAlert('错误', '未选择角色');
+    return;
+  }
+  
+  const char = state.chats[activeMyPhoneCharacterId];
+  if (!char.myPhoneAmapHistory) {
+    char.myPhoneAmapHistory = [];
+  }
+  
+  const newLocation = {
+    locationName: location,
+    address: address || '',
+    comment: thought || '',
+    timeAgo: timeInput || '刚刚',
+    timestamp: Date.now()
+  };
+  
+  char.myPhoneAmapHistory.unshift(newLocation);
+  await db.chats.put(char);
+  renderMyPhoneAmap();
+  
+  document.getElementById('myphone-add-amap-modal')?.classList.remove('visible');
+  document.getElementById('myphone-amap-location-input').value = '';
+  document.getElementById('myphone-amap-address-input').value = '';
+  document.getElementById('myphone-amap-thought-input').value = '';
+  document.getElementById('myphone-amap-time-input').value = '';
+  showCustomAlert('成功', '足迹已添加');
+}
+
+async function saveMyPhoneUsage() {
+  const appName = document.getElementById('myphone-usage-app-input')?.value?.trim();
+  const category = document.getElementById('myphone-usage-category-input')?.value?.trim();
+  const iconUrl = document.getElementById('myphone-usage-icon-input')?.value?.trim();
+  const duration = document.getElementById('myphone-usage-duration-input')?.value || '30';
+  
+  if (!appName) {
+    showCustomAlert('错误', '请填写应用名称');
+    return;
+  }
+  
+  if (!activeMyPhoneCharacterId) {
+    showCustomAlert('错误', '未选择角色');
+    return;
+  }
+  
+  const char = state.chats[activeMyPhoneCharacterId];
+  if (!char.myPhoneAppUsage) {
+    char.myPhoneAppUsage = [];
+  }
+  
+  const newUsage = {
+    appName: appName,
+    category: category || '其他',
+    usageTimeMinutes: parseInt(duration),
+    iconUrl: iconUrl || '',
+    timestamp: Date.now()
+  };
+  
+  char.myPhoneAppUsage.unshift(newUsage);
+  await db.chats.put(char);
+  renderMyPhoneAppUsage();
+  
+  document.getElementById('myphone-add-usage-modal')?.classList.remove('visible');
+  document.getElementById('myphone-usage-app-input').value = '';
+  document.getElementById('myphone-usage-category-input').value = '';
+  document.getElementById('myphone-usage-icon-input').value = '';
+  document.getElementById('myphone-usage-duration-input').value = '30';
+  showCustomAlert('成功', '使用记录已添加');
+}
+
+// 渲染一起听歌曲列表供选择
+function renderMyPhoneYiqitingSongList() {
+  const listEl = document.getElementById('myphone-yiqiting-song-list');
+  listEl.innerHTML = '';
+  
+  // 从全局一起听播放列表中获取歌曲
+  const yiqitingPlaylist = musicState.playlist || [];
+  
+  if (yiqitingPlaylist.length === 0) {
+    listEl.innerHTML = '<p style="text-align:center; color: var(--text-secondary); padding: 20px;">一起听播放列表为空<br>请先在主屏幕QQ一起听中添加歌曲</p>';
+    return;
+  }
+  
+  yiqitingPlaylist.forEach((song, index) => {
+    const item = document.createElement('div');
+    item.className = 'yiqiting-song-item';
+    item.style.cssText = 'display: flex; align-items: center; padding: 10px; border-bottom: 1px solid var(--border-color); cursor: pointer; transition: background 0.2s;';
+    
+    item.innerHTML = `
+      <input type="checkbox" class="yiqiting-song-checkbox" data-index="${index}" style="margin-right: 10px; width: 18px; height: 18px; cursor: pointer;">
+      <div style="flex: 1;">
+        <div style="font-weight: 500; color: var(--text-color);">${song.name || '未知歌曲'}</div>
+        <div style="font-size: 12px; color: var(--text-secondary); margin-top: 2px;">${song.artist || '未知歌手'}</div>
+      </div>
+    `;
+    
+    // 点击整行也能切换复选框
+    item.addEventListener('click', (e) => {
+      if (e.target.tagName !== 'INPUT') {
+        const checkbox = item.querySelector('.yiqiting-song-checkbox');
+        checkbox.checked = !checkbox.checked;
+      }
+    });
+    
+    // hover效果
+    item.addEventListener('mouseenter', () => {
+      item.style.background = 'var(--hover-bg)';
+    });
+    item.addEventListener('mouseleave', () => {
+      item.style.background = 'transparent';
+    });
+    
+    listEl.appendChild(item);
+  });
+}
+
+// 切换MYphone音乐添加方式的输入框显示
+function toggleMyPhoneMusicInputs() {
+  const source = document.getElementById('myphone-music-source-select')?.value;
+  const fileGroup = document.getElementById('myphone-music-file-group');
+  const urlGroup = document.getElementById('myphone-music-url-group');
+  const yiqitingListGroup = document.getElementById('myphone-yiqiting-list-group');
+  const manualInputs = document.getElementById('myphone-music-manual-inputs');
+  
+  if (source === 'yiqiting') {
+    // 从一起听导入：显示歌曲列表，隐藏其他
+    fileGroup.style.display = 'none';
+    yiqitingListGroup.style.display = 'block';
+    manualInputs.style.display = 'none';
+    renderMyPhoneYiqitingSongList();
+  } else if (source === 'local') {
+    // 本地文件：显示文件选择和手动输入，隐藏URL
+    fileGroup.style.display = 'block';
+    urlGroup.style.display = 'none';
+    yiqitingListGroup.style.display = 'none';
+    manualInputs.style.display = 'block';
+  } else {
+    // 网络URL：显示URL输入和手动输入
+    fileGroup.style.display = 'none';
+    urlGroup.style.display = 'block';
+    yiqitingListGroup.style.display = 'none';
+    manualInputs.style.display = 'block';
+  }
+}
+
+async function saveMyPhoneMusic() {
+  const source = document.getElementById('myphone-music-source-select')?.value;
+  
+  if (!activeMyPhoneCharacterId) {
+    showCustomAlert('错误', '未选择角色');
+    return;
+  }
+  
+  const char = state.chats[activeMyPhoneCharacterId];
+  if (!char.myPhoneMusicPlaylist) {
+    char.myPhoneMusicPlaylist = [];
+  }
+  
+  // 根据添加方式处理
+  if (source === 'yiqiting') {
+    // 从一起听导入选中的歌曲
+    const checkboxes = document.querySelectorAll('.yiqiting-song-checkbox:checked');
+    
+    if (checkboxes.length === 0) {
+      showCustomAlert('错误', '请至少选择一首歌曲');
+      return;
+    }
+    
+    let importedCount = 0;
+    checkboxes.forEach(checkbox => {
+      const index = parseInt(checkbox.dataset.index);
+      const originalSong = musicState.playlist[index];
+      
+      if (originalSong) {
+        // 深拷贝歌曲对象（避免引用问题）
+        const newSong = {
+          name: originalSong.name,
+          artist: originalSong.artist,
+          src: originalSong.src,
+          fileType: originalSong.fileType,
+          isLocal: originalSong.isLocal,
+          lrcContent: originalSong.lrcContent || "",
+          cover: originalSong.cover || 'https://via.placeholder.com/300x300/cccccc/666666?text=Music'
+        };
+        
+        char.myPhoneMusicPlaylist.unshift(newSong);
+        importedCount++;
+      }
+    });
+    
+    await db.chats.put(char);
+    renderMyPhoneMusicScreen();
+    
+    document.getElementById('myphone-add-music-modal')?.classList.remove('visible');
+    // 重置全选复选框
+    document.getElementById('myphone-yiqiting-select-all').checked = false;
+    showCustomAlert('成功', `已导入 ${importedCount} 首歌曲`);
+    
+  } else if (source === 'local') {
+    // 本地文件上传
+    const fileInput = document.getElementById('myphone-music-file-input');
+    const file = fileInput?.files[0];
+    const title = document.getElementById('myphone-music-title-input')?.value?.trim();
+    const artist = document.getElementById('myphone-music-artist-input')?.value?.trim();
+    
+    if (!file) {
+      showCustomAlert('错误', '请选择音频文件');
+      return;
+    }
+    
+    if (!title) {
+      showCustomAlert('错误', '请填写歌曲标题');
+      return;
+    }
+    
+    let songSrc = null;
+    let isLocal = true;
+    
+    try {
+      const catboxUrl = await uploadFileToCatbox(file);
+      
+      if (catboxUrl) {
+        songSrc = catboxUrl;
+        isLocal = false;
+        await showCustomAlert("上传成功", `歌曲 "${file.name}" 已成功上传到 Catbox！`);
+      } else {
+        console.log("Catbox 未配置，将歌曲保存为本地 ArrayBuffer。");
+        songSrc = await file.arrayBuffer();
+        isLocal = true;
+      }
+    } catch (uploadError) {
+      console.error("Catbox 上传失败:", uploadError);
+      await showCustomAlert("上传失败", `上传到 Catbox 失败: ${uploadError.message}\n\n将改为本地保存。`);
+      songSrc = await file.arrayBuffer();
+      isLocal = true;
+    }
+    
+    const newSong = {
+      name: title,
+      artist: artist || '未知歌手',
+      src: songSrc,
+      fileType: file.type,
+      isLocal: isLocal,
+      lrcContent: "",
+      cover: 'https://via.placeholder.com/300x300/cccccc/666666?text=Music'
+    };
+    
+    char.myPhoneMusicPlaylist.unshift(newSong);
+    await db.chats.put(char);
+    renderMyPhoneMusicScreen();
+    
+    document.getElementById('myphone-add-music-modal')?.classList.remove('visible');
+    document.getElementById('myphone-music-title-input').value = '';
+    document.getElementById('myphone-music-artist-input').value = '';
+    document.getElementById('myphone-music-file-input').value = '';
+    showCustomAlert('成功', '歌曲已添加');
+    
+  } else {
+    // 网络URL
+    const url = document.getElementById('myphone-music-url-input')?.value?.trim();
+    const title = document.getElementById('myphone-music-title-input')?.value?.trim();
+    const artist = document.getElementById('myphone-music-artist-input')?.value?.trim();
+    
+    if (!title || !url) {
+      showCustomAlert('错误', '请填写歌曲标题和链接');
+      return;
+    }
+    
+    const newSong = {
+      name: title,
+      artist: artist || '未知歌手',
+      src: url,
+      isLocal: false,
+      lrcContent: "",
+      cover: 'https://via.placeholder.com/300x300/cccccc/666666?text=Music'
+    };
+    
+    char.myPhoneMusicPlaylist.unshift(newSong);
+    await db.chats.put(char);
+    renderMyPhoneMusicScreen();
+    
+    document.getElementById('myphone-add-music-modal')?.classList.remove('visible');
+    document.getElementById('myphone-music-title-input').value = '';
+    document.getElementById('myphone-music-artist-input').value = '';
+    document.getElementById('myphone-music-url-input').value = '';
+    showCustomAlert('成功', '歌曲已添加');
+  }
+}
+
 let lockScreenState = {
       passwordBuffer: '',
       isLocked: false
@@ -49338,6 +51559,25 @@ ${recentHistoryWithUser}
     window.openCharWallet = openCharWallet;
     window.switchToCharHomeScreen = switchToCharHomeScreen;
     window.openNpcEditor = openNpcEditor;
+    
+    // MY Phone 函数暴露
+    window.openMyphoneScreen = openMyphoneScreen;
+    window.openMyPhoneApp = openMyPhoneApp;
+    window.switchToMyPhoneHomeScreen = switchToMyPhoneHomeScreen;
+    window.switchToCPhone = switchToCPhone;
+    window.openMyPhoneSettings = openMyPhoneSettings;
+    window.openMyPhoneViewRecords = openMyPhoneViewRecords;
+    window.showMyPhoneAddContactDialog = showMyPhoneAddContactDialog;
+    window.manualCreateMyPhoneContact = manualCreateMyPhoneContact;
+    window.showImportMainScreenCharacters = showImportMainScreenCharacters;
+    window.updateImportSelectAllState = updateImportSelectAllState;
+    window.importSelectedCharacters = importSelectedCharacters;
+    window.openMyPhoneContactSettings = openMyPhoneContactSettings;
+    window.saveMyPhoneContactSettings = saveMyPhoneContactSettings;
+    window.changeMyPhoneContactAvatar = changeMyPhoneContactAvatar;
+    window.addMyPhoneMessage = addMyPhoneMessage;
+    window.showMyPhoneTransferActionModal = showMyPhoneTransferActionModal;
+    window.handleMyPhoneTransferResponse = handleMyPhoneTransferResponse;
 
 
 
@@ -50557,60 +52797,6 @@ ${recentHistoryWithUser}
       }
     });
 
-    // 角色监测按钮事件监听
-    document.getElementById('character-monitor-btn')?.addEventListener('click', openCharacterMonitor);
-    document.getElementById('monitor-back-btn')?.addEventListener('click', () => showScreen('chat-interface-screen'));
-    
-    // 日期选择按钮
-    document.getElementById('monitor-date-picker-btn')?.addEventListener('click', async () => {
-      if (!state.activeChatId) return;
-      
-      const dateInput = document.createElement('input');
-      dateInput.type = 'date';
-      dateInput.value = currentMonitorDate || formatMonitorDate(new Date());
-      dateInput.style.position = 'absolute';
-      dateInput.style.opacity = '0';
-      document.body.appendChild(dateInput);
-      
-      dateInput.addEventListener('change', async () => {
-        const selectedDate = dateInput.value;
-        await generateMonitorData(state.activeChatId, selectedDate, 'full');
-        document.body.removeChild(dateInput);
-      });
-      
-      dateInput.showPicker();
-    });
-    
-    // 设置按钮
-    document.getElementById('monitor-settings-btn')?.addEventListener('click', async () => {
-      await showCustomAlert('角色监测设置', '功能开发中，敬请期待！');
-    });
-    
-    document.getElementById('monitor-regenerate-btn')?.addEventListener('click', async () => {
-      if (!currentMonitorData || !state.activeChatId) return;
-      const confirmed = await showCustomConfirm('确认', '是否重新生成所有未编辑的时段？');
-      if (confirmed) {
-        const unedited = currentMonitorData.timeline.filter(s => !s.isEdited);
-        for (const segment of unedited) {
-          await regenerateMonitorSegment(segment.timeRange);
-        }
-      }
-    });
-    
-    document.getElementById('monitor-generate-today-btn')?.addEventListener('click', async () => {
-      if (!state.activeChatId) return;
-      const today = new Date();
-      const todayStr = formatMonitorDate(today);
-      await generateMonitorData(state.activeChatId, todayStr, 'full');
-    });
-    
-    document.getElementById('monitor-predict-future-btn')?.addEventListener('click', async () => {
-      if (!state.activeChatId) return;
-      const today = new Date();
-      const todayStr = formatMonitorDate(today);
-      await generateMonitorData(state.activeChatId, todayStr, 'full');
-    });
-
     document.getElementById('chat-settings-btn').addEventListener('click', async () => {
       loadThemePresetsDropdown();
       if (!state.activeChatId) return;
@@ -51740,6 +53926,37 @@ if (isGroup) {
 
     document.getElementById('upload-image-btn').addEventListener('click', () => document.getElementById('image-upload-input').click());
    document.getElementById('image-upload-input').addEventListener('change', async (event) => {
+      const file = event.target.files[0];
+      if (!file || !state.activeChatId) return;
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+        const base64Url = e.target.result;
+        const chat = state.chats[state.activeChatId];
+        const msg = {
+          role: 'user',
+          content: [{
+            type: 'image_url',
+            image_url: {
+              url: base64Url
+            }
+          }],
+          timestamp: Date.now()
+        };
+        chat.history.push(msg);
+        await db.chats.put(chat);
+        appendMessage(msg, chat);
+        renderChatList();
+      };
+      reader.readAsDataURL(file);
+      event.target.value = null;
+    });
+    
+    // 拍照按钮事件处理
+    document.getElementById('camera-capture-btn').addEventListener('click', () => {
+      document.getElementById('camera-capture-input').click();
+    });
+    
+    document.getElementById('camera-capture-input').addEventListener('change', async (event) => {
       const file = event.target.files[0];
       if (!file || !state.activeChatId) return;
       const reader = new FileReader();
@@ -53129,9 +55346,29 @@ if (isGroup) {
     
 
 
-    document.getElementById('transfer-action-accept').addEventListener('click', () => handleUserTransferResponse('accepted'));
-    document.getElementById('transfer-action-decline').addEventListener('click', () => handleUserTransferResponse('declined'));
-    document.getElementById('transfer-action-cancel').addEventListener('click', hideTransferActionModal);
+    document.getElementById('transfer-action-accept').addEventListener('click', () => {
+      // 检查是否在 My Phone 环境中
+      if (activeMyPhoneTransferTimestamp !== null && typeof activeMyPhoneTransferTimestamp !== 'undefined') {
+        handleMyPhoneTransferResponse('accepted');
+      } else {
+        handleUserTransferResponse('accepted');
+      }
+    });
+    document.getElementById('transfer-action-decline').addEventListener('click', () => {
+      // 检查是否在 My Phone 环境中
+      if (activeMyPhoneTransferTimestamp !== null && typeof activeMyPhoneTransferTimestamp !== 'undefined') {
+        handleMyPhoneTransferResponse('declined');
+      } else {
+        handleUserTransferResponse('declined');
+      }
+    });
+    document.getElementById('transfer-action-cancel').addEventListener('click', () => {
+      hideTransferActionModal();
+      // 清除 My Phone 转账状态
+      if (typeof activeMyPhoneTransferTimestamp !== 'undefined') {
+        activeMyPhoneTransferTimestamp = null;
+      }
+    });
 
 
 
@@ -55164,6 +57401,325 @@ if (isGroup) {
     document.getElementById('close-char-music-player-btn').addEventListener('click', closeCharMusicPlayer);
     document.getElementById('regenerate-douban-btn').addEventListener('click', handleGenerateDoubanPosts);
     document.getElementById('regenerate-douban-btn').addEventListener('click', handleGenerateDoubanPosts);
+    
+    // MY Phone 重新生成按钮事件监听
+    document.getElementById('regenerate-myphone-qq-btn')?.addEventListener('click', async () => {
+      showCustomAlert("正在执行...", "正在生成我的模拟聊天记录...");
+      try {
+        await handleGenerateMyPhoneQQ();
+        renderMyPhoneSimulatedQQ();
+        showCustomAlert("完成", "我的QQ聊天记录已生成！");
+      } catch (error) {
+        showCustomAlert("错误", "生成失败：" + error.message);
+      }
+    });
+    
+    // MY Phone QQ 添加按钮事件监听
+    document.getElementById('add-myphone-qq-btn')?.addEventListener('click', () => {
+      showMyPhoneAddContactDialog();
+    });
+    
+    // MY Phone 添加联系人选择弹窗按钮
+    document.getElementById('myphone-manual-create-btn')?.addEventListener('click', () => {
+      manualCreateMyPhoneContact();
+    });
+    
+    document.getElementById('myphone-import-from-main-btn')?.addEventListener('click', () => {
+      showImportMainScreenCharacters();
+    });
+    
+    document.getElementById('cancel-myphone-add-choice-btn')?.addEventListener('click', () => {
+      document.getElementById('myphone-add-choice-modal')?.classList.remove('visible');
+    });
+    
+    // MY Phone 导入角色弹窗按钮
+    document.getElementById('select-all-myphone-import')?.addEventListener('change', (e) => {
+      const isChecked = e.target.checked;
+      document.querySelectorAll('.myphone-import-checkbox').forEach(cb => {
+        cb.checked = isChecked;
+      });
+    });
+    
+    document.getElementById('confirm-myphone-import-btn')?.addEventListener('click', () => {
+      importSelectedCharacters();
+    });
+    
+    document.getElementById('cancel-myphone-import-btn')?.addEventListener('click', () => {
+      document.getElementById('myphone-import-characters-modal')?.classList.remove('visible');
+    });
+    
+    // MY Phone 联系人设置按钮
+    document.getElementById('myphone-conversation-settings-btn')?.addEventListener('click', () => {
+      openMyPhoneContactSettings();
+    });
+    
+    // MY Phone 设置界面按钮
+    document.getElementById('back-to-myphone-conversation-btn')?.addEventListener('click', async () => {
+      const index = window.currentMyPhoneConversationIndex;
+      if (index !== undefined) {
+        await openMyPhoneConversation(index);
+      }
+    });
+    
+    document.getElementById('myphone-change-avatar-btn')?.addEventListener('click', () => {
+      changeMyPhoneContactAvatar();
+    });
+    
+    document.getElementById('myphone-save-contact-settings-btn')?.addEventListener('click', () => {
+      saveMyPhoneContactSettings();
+    });
+    
+    document.getElementById('myphone-add-message-btn')?.addEventListener('click', () => {
+      addMyPhoneMessage();
+    });
+    
+    // MY Phone QQ 对话消息点击事件监听（图片、语音、转账）
+    document.getElementById('myphone-conversation-messages')?.addEventListener('click', async (e) => {
+      // 1. 处理 AI 生成的图片点击 - 显示描述
+      const aiImage = e.target.closest('.ai-generated-image');
+      if (aiImage) {
+        const description = aiImage.dataset.description;
+        if (description) {
+          showCustomAlert('照片描述', description);
+        }
+        return;
+      }
+      
+      // 2. 处理语音消息点击 - 显示/隐藏文字
+      const voiceBody = e.target.closest('.voice-message-body[data-text]');
+      if (voiceBody) {
+        const bubble = voiceBody.closest('.message-bubble');
+        if (!bubble) return;
+        
+        const transcriptEl = bubble.querySelector('.voice-transcript');
+        const text = decodeURIComponent(voiceBody.dataset.text);
+        
+        if (transcriptEl.style.display === 'block') {
+          // 隐藏文字
+          transcriptEl.style.display = 'none';
+        } else {
+          // 显示文字
+          transcriptEl.textContent = text;
+          transcriptEl.style.display = 'block';
+        }
+        return;
+      }
+      
+      // 3. 处理转账点击 - 显示接收/拒绝弹窗
+      const bubble = e.target.closest('.message-bubble');
+      if (bubble && bubble.classList.contains('ai') && bubble.classList.contains('is-transfer') && bubble.dataset.status === 'pending') {
+        const timestamp = parseInt(bubble.dataset.timestamp);
+        if (!isNaN(timestamp)) {
+          // 显示转账操作弹窗
+          showMyPhoneTransferActionModal(timestamp);
+        }
+        return;
+      }
+    });
+    
+    document.getElementById('regenerate-myphone-album-btn')?.addEventListener('click', async () => {
+      showCustomAlert("正在执行...", "正在生成我的相册...");
+      try {
+        await handleGenerateMyPhoneAlbum();
+        renderMyPhoneAlbum();
+        showCustomAlert("完成", "我的相册已生成！");
+      } catch (error) {
+        showCustomAlert("错误", "生成失败：" + error.message);
+      }
+    });
+    
+    document.getElementById('regenerate-myphone-browser-btn')?.addEventListener('click', async () => {
+      showCustomAlert("正在执行...", "正在生成我的浏览记录...");
+      try {
+        await handleGenerateMyPhoneBrowserHistory();
+        renderMyPhoneBrowserHistory();
+        showCustomAlert("完成", "我的浏览记录已生成！");
+      } catch (error) {
+        showCustomAlert("错误", "生成失败：" + error.message);
+      }
+    });
+    
+    document.getElementById('regenerate-myphone-taobao-btn')?.addEventListener('click', async () => {
+      showCustomAlert("正在执行...", "正在生成我的淘宝记录...");
+      try {
+        await handleGenerateMyPhoneTaobao();
+        renderMyPhoneTaobao();
+        showCustomAlert("完成", "我的淘宝记录已生成！");
+      } catch (error) {
+        showCustomAlert("错误", "生成失败：" + error.message);
+      }
+    });
+    
+    document.getElementById('regenerate-myphone-memo-btn')?.addEventListener('click', async () => {
+      showCustomAlert("正在执行...", "正在生成我的备忘录...");
+      try {
+        await handleGenerateMyPhoneMemos();
+        renderMyPhoneMemoList();
+        showCustomAlert("完成", "我的备忘录已生成！");
+      } catch (error) {
+        showCustomAlert("错误", "生成失败：" + error.message);
+      }
+    });
+    
+    document.getElementById('regenerate-myphone-diary-btn')?.addEventListener('click', async () => {
+      showCustomAlert("正在执行...", "正在生成我的日记...");
+      try {
+        await handleGenerateMyPhoneDiaries();
+        renderMyPhoneDiaryList();
+        showCustomAlert("完成", "我的日记已生成！");
+      } catch (error) {
+        showCustomAlert("错误", "生成失败：" + error.message);
+      }
+    });
+    
+    document.getElementById('regenerate-myphone-amap-btn')?.addEventListener('click', async () => {
+      showCustomAlert("正在执行...", "正在生成我的足迹...");
+      try {
+        await handleGenerateMyPhoneAmap();
+        renderMyPhoneAmap();
+        showCustomAlert("完成", "我的足迹已生成！");
+      } catch (error) {
+        showCustomAlert("错误", "生成失败：" + error.message);
+      }
+    });
+    
+    document.getElementById('regenerate-myphone-usage-btn')?.addEventListener('click', async () => {
+      showCustomAlert("正在执行...", "正在生成我的APP使用记录...");
+      try {
+        await handleGenerateMyPhoneAppUsage();
+        renderMyPhoneAppUsage();
+        showCustomAlert("完成", "我的APP使用记录已生成！");
+      } catch (error) {
+        showCustomAlert("错误", "生成失败：" + error.message);
+      }
+    });
+    
+    document.getElementById('regenerate-myphone-music-btn')?.addEventListener('click', async () => {
+      showCustomAlert("正在执行...", "正在生成我的音乐歌单...");
+      try {
+        await handleGenerateMyPhoneMusic();
+        renderMyPhoneMusicScreen();
+        showCustomAlert("完成", "我的音乐歌单已生成！");
+      } catch (error) {
+        showCustomAlert("错误", "生成失败：" + error.message);
+      }
+    });
+    
+    // MY Phone 手动添加按钮事件监听
+    document.getElementById('add-myphone-album-btn')?.addEventListener('click', () => {
+      document.getElementById('myphone-add-album-modal')?.classList.add('visible');
+    });
+    
+    document.getElementById('add-myphone-browser-btn')?.addEventListener('click', () => {
+      document.getElementById('myphone-add-browser-modal')?.classList.add('visible');
+    });
+    
+    document.getElementById('add-myphone-taobao-btn')?.addEventListener('click', () => {
+      document.getElementById('myphone-add-taobao-modal')?.classList.add('visible');
+    });
+    
+    document.getElementById('add-myphone-diary-btn')?.addEventListener('click', () => {
+      const today = new Date().toISOString().split('T')[0];
+      document.getElementById('myphone-diary-date-input').value = today;
+      document.getElementById('myphone-add-diary-modal')?.classList.add('visible');
+    });
+    
+    document.getElementById('add-myphone-memo-btn')?.addEventListener('click', () => {
+      document.getElementById('myphone-add-memo-modal')?.classList.add('visible');
+    });
+    
+    document.getElementById('add-myphone-amap-btn')?.addEventListener('click', () => {
+      document.getElementById('myphone-add-amap-modal')?.classList.add('visible');
+    });
+    
+    document.getElementById('add-myphone-usage-btn')?.addEventListener('click', () => {
+      document.getElementById('myphone-add-usage-modal')?.classList.add('visible');
+    });
+    
+    document.getElementById('add-myphone-music-btn')?.addEventListener('click', () => {
+      // 重置为本地文件模式
+      document.getElementById('myphone-music-source-select').value = 'local';
+      toggleMyPhoneMusicInputs();
+      document.getElementById('myphone-add-music-modal')?.classList.add('visible');
+    });
+    
+    // 监听添加方式切换
+    document.getElementById('myphone-music-source-select')?.addEventListener('change', toggleMyPhoneMusicInputs);
+    
+    // 一起听歌曲全选功能
+    document.getElementById('myphone-yiqiting-select-all')?.addEventListener('change', (e) => {
+      const checkboxes = document.querySelectorAll('.yiqiting-song-checkbox');
+      checkboxes.forEach(checkbox => {
+        checkbox.checked = e.target.checked;
+      });
+    });
+    
+    // MY Phone 模态框取消按钮
+    document.getElementById('cancel-myphone-album-btn')?.addEventListener('click', () => {
+      document.getElementById('myphone-add-album-modal')?.classList.remove('visible');
+    });
+    
+    document.getElementById('cancel-myphone-browser-btn')?.addEventListener('click', () => {
+      document.getElementById('myphone-add-browser-modal')?.classList.remove('visible');
+    });
+    
+    document.getElementById('cancel-myphone-taobao-btn')?.addEventListener('click', () => {
+      document.getElementById('myphone-add-taobao-modal')?.classList.remove('visible');
+    });
+    
+    document.getElementById('cancel-myphone-diary-btn')?.addEventListener('click', () => {
+      document.getElementById('myphone-add-diary-modal')?.classList.remove('visible');
+    });
+    
+    document.getElementById('cancel-myphone-memo-btn')?.addEventListener('click', () => {
+      document.getElementById('myphone-add-memo-modal')?.classList.remove('visible');
+    });
+    
+    document.getElementById('cancel-myphone-amap-btn')?.addEventListener('click', () => {
+      document.getElementById('myphone-add-amap-modal')?.classList.remove('visible');
+    });
+    
+    document.getElementById('cancel-myphone-usage-btn')?.addEventListener('click', () => {
+      document.getElementById('myphone-add-usage-modal')?.classList.remove('visible');
+    });
+    
+    document.getElementById('cancel-myphone-music-btn')?.addEventListener('click', () => {
+      document.getElementById('myphone-add-music-modal')?.classList.remove('visible');
+    });
+    
+    // MY Phone 模态框保存按钮
+    document.getElementById('save-myphone-album-btn')?.addEventListener('click', () => {
+      saveMyPhoneAlbum();
+    });
+    
+    document.getElementById('save-myphone-browser-btn')?.addEventListener('click', () => {
+      saveMyPhoneBrowser();
+    });
+    
+    document.getElementById('save-myphone-taobao-btn')?.addEventListener('click', () => {
+      saveMyPhoneTaobao();
+    });
+    
+    document.getElementById('save-myphone-diary-btn')?.addEventListener('click', () => {
+      saveMyPhoneDiary();
+    });
+    
+    document.getElementById('save-myphone-memo-btn')?.addEventListener('click', () => {
+      saveMyPhoneMemo();
+    });
+    
+    document.getElementById('save-myphone-amap-btn')?.addEventListener('click', () => {
+      saveMyPhoneAmap();
+    });
+    
+    document.getElementById('save-myphone-usage-btn')?.addEventListener('click', () => {
+      saveMyPhoneUsage();
+    });
+    
+    document.getElementById('save-myphone-music-btn')?.addEventListener('click', () => {
+      saveMyPhoneMusic();
+    });
+    
     document.getElementById('douban-detail-back-btn').addEventListener('click', () => showScreen('douban-screen'));
     document.getElementById('douban-send-comment-btn').addEventListener('click', handleSendDoubanComment);
     document.getElementById('douban-wait-reply-btn').addEventListener('click', handleDoubanWaitReply);
