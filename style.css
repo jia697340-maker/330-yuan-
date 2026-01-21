@@ -5860,14 +5860,16 @@
     flex-grow: 1;
     min-width: 0; 
 }
-#char-qq-conversation-screen .list-container {
+#char-qq-conversation-screen .list-container,
+#myphone-qq-conversation-screen .list-container {
     display: flex;
     flex-direction: column;
     gap: 20px; 
     padding: 15px; 
     background-color: #f0f2f5;
 }
-#phone-screen.dark-mode #char-qq-conversation-screen .list-container {
+#phone-screen.dark-mode #char-qq-conversation-screen .list-container,
+#phone-screen.dark-mode #myphone-qq-conversation-screen .list-container {
     background-color: #000000;
 }
 #char-qq-screen, 

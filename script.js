@@ -1,5 +1,46 @@
 const ACTIVATION_PIN_URL = 'https://gist.githubusercontent.com/cx3300-1/f04ec50b5e8f2d88365d17ff35efffcf/raw/cd28d8825c5c34ea10bda8a4518a1a6a1f5a7d13/pin.txt';
 
+// ========== QQ主屏幕Undefined过滤器（外链功能） ==========
+/**
+ * 过滤消息内容中的undefined文本
+ * 用于主屏幕QQ聊天，当角色输出undefined时自动过滤
+ * @param {string} content - 原始消息内容
+ * @returns {string} - 过滤后的消息内容
+ */
+function qqUndefinedFilter(content) {
+  if (!content || typeof content !== 'string') {
+    return content;
+  }
+
+  // 过滤各种形式的undefined
+  let filtered = content
+    // 过滤单独的undefined（前后可能有空格、换行等）
+    .replace(/^\s*undefined\s*$/gi, '')
+    // 过滤句子开头的undefined
+    .replace(/^\s*undefined\s+/gi, '')
+    // 过滤句子结尾的undefined
+    .replace(/\s+undefined\s*$/gi, '')
+    // 过滤句子中间的undefined（两边有空格）
+    .replace(/\s+undefined\s+/gi, ' ')
+    // 过滤连续多个undefined
+    .replace(/undefined\s*undefined/gi, '')
+    // 过滤undefined后面跟标点符号的情况
+    .replace(/undefined([,，.。!！?？;；:：])/gi, '$1')
+    // 过滤标点符号后面跟undefined的情况
+    .replace(/([,，.。!！?？;；:：])\s*undefined/gi, '$1');
+
+  // 如果过滤后只剩空白字符，返回空字符串
+  filtered = filtered.trim();
+  
+  // 如果整个内容都是undefined，返回空字符串
+  if (filtered === '' || filtered.toLowerCase() === 'undefined') {
+    return '';
+  }
+
+  return filtered;
+}
+// ========== QQ主屏幕Undefined过滤器结束 ==========
+
 function escapeHTML(str) {
   if (!str) return '';
   return str.replace(/[&<>"']/g, function(match) {
@@ -2590,6 +2631,9 @@ let selectedQuickReplies = new Set();
   let cphoneRenderedCount = 0;
   let cphoneActiveConversationType = null;
   let isLoadingMoreCphoneMessages = false;
+  let myphoneRenderedCount = 0;
+  let myphoneActiveConversationIndex = null;
+  let isLoadingMoreMyPhoneMessages = false;
   let activeStickerCategoryId = 'all';
   let selectedMessages = new Set();
   let editingMemberId = null;
@@ -9231,6 +9275,712 @@ https://xx.com/4.jpg 疑惑`;
       throw new Error("不支持的文件格式");
   }
 
+  // 处理角色文件导入 (.txt/.docx/.zip) - 支持多文件一次性导入
+  function handleCharacterFileImport() {
+    return new Promise(resolve => {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = '.txt,.docx,.zip'; // 支持 TXT、DOCX 和 ZIP
+      input.multiple = true; // 支持多文件选择
+      
+      input.onchange = async e => {
+        const files = Array.from(e.target.files);
+        if (!files || files.length === 0) {
+            resolve();
+            return;
+        }
+
+        // 分离 ZIP 文件和普通文件
+        const zipFiles = files.filter(f => f.name.toLowerCase().endsWith('.zip'));
+        const normalFiles = files.filter(f => !f.name.toLowerCase().endsWith('.zip'));
+        
+        // 先处理 ZIP 文件
+        for (const zipFile of zipFiles) {
+          try {
+            await handleZipFileImport(zipFile);
+          } catch (error) {
+            console.error(`ZIP文件"${zipFile.name}"处理失败:`, error);
+            await showCustomAlert('ZIP文件处理失败', `文件"${zipFile.name}"处理失败: ${error.message}`);
+          }
+        }
+        
+        // 如果没有普通文件，直接结束
+        if (normalFiles.length === 0) {
+          resolve();
+          return;
+        }
+
+        let importedCount = 0;
+        let skippedCount = 0;
+        let failedCount = 0;
+        
+        // 逐个处理普通文件
+        for (let i = 0; i < normalFiles.length; i++) {
+          const file = normalFiles[i];
+          
+          try {
+              // 解析文件内容
+              const textContent = await processCharacterFile(file);
+              
+              if (!textContent || !textContent.trim()) {
+                  await showCustomAlert('文件内容为空', `文件"${file.name}"内容为空或无法解析，已跳过。`);
+                  skippedCount++;
+                  continue;
+              }
+
+              // 显示内容确认弹窗（带文件名和进度）
+              const action = await showMultiFileContentConfirmModal(
+                textContent, 
+                file.name, 
+                i + 1, 
+                normalFiles.length
+              );
+              
+              if (action === 'cancel') {
+                  // 用户选择取消整个导入流程
+                  break;
+              } else if (action === 'skip') {
+                  // 跳过当前文件，继续下一个
+                  skippedCount++;
+                  continue;
+              }
+
+              // 进入手动创建流程
+              const remarkName = await showCustomPrompt(
+                `创建角色 [${i + 1}/${normalFiles.length}] (第1/2步)`, 
+                `文件: ${file.name}\n\n请输入你想为Ta设置的【备注名】(例如: 哥哥)`
+              );
+              if (!remarkName || !remarkName.trim()) {
+                  skippedCount++;
+                  continue;
+              }
+
+              const originalName = await showCustomPrompt(
+                `创建角色 [${i + 1}/${normalFiles.length}] (第2/2步)`, 
+                `文件: ${file.name}\n\n请输入Ta的【本名】(例如: 李星辰，这个名字将用于AI识别)`
+              );
+              if (!originalName || !originalName.trim()) {
+                  skippedCount++;
+                  continue;
+              }
+
+              // 创建新聊天，aiPersona 使用导入的内容
+              const newChatId = 'chat_' + Date.now() + '_' + i; // 添加索引避免ID冲突
+              const newChat = {
+                id: newChatId,
+                name: remarkName.trim(),
+                originalName: originalName.trim(),
+                isGroup: false,
+                isPinned: false,
+                unreadCount: 0,
+                relationship: {
+                  status: 'friend',
+                  blockedTimestamp: null,
+                  applicationReason: ''
+                },
+                status: {
+                  text: '在线',
+                  lastUpdate: Date.now(),
+                  isBusy: false
+                },
+                settings: {
+                  aiPersona: textContent.trim(), // 使用导入的内容作为对方人设
+                  myPersona: '我是谁呀。',
+                  myNickname: '我',
+                  maxMemory: 10,
+                  aiAvatar: defaultAvatar,
+                  myAvatar: defaultAvatar,
+                  background: '',
+                  theme: 'default',
+                  fontSize: 13,
+                  customCss: '',
+                  linkedWorldBookIds: [],
+                  aiAvatarLibrary: [],
+                  myAvatarLibrary: [],
+                  enableBackgroundActivity: true,
+                  actionCooldownMinutes: 15,
+                  enableTimePerception: true,
+                  isOfflineMode: false,
+                  offlineMinLength: 100,
+                  offlineMaxLength: 300,
+                  offlinePresetId: null,
+                  timeZone: 'Asia/Shanghai',
+                  myPhoneLockScreenEnabled: false,
+                  myPhoneLockScreenPassword: ''
+                },
+                history: [],
+                musicData: {
+                  totalTime: 0
+                },
+                longTermMemory: [],
+                thoughtsHistory: []
+              };
+              
+              state.chats[newChatId] = newChat;
+              await db.chats.put(newChat);
+              importedCount++;
+              
+              // 每导入一个后刷新列表
+              renderChatList();
+              
+          } catch (error) {
+              console.error(`文件"${file.name}"导入失败:`, error);
+              await showCustomAlert('文件导入失败', `文件"${file.name}"解析失败: ${error.message}`);
+              failedCount++;
+          }
+        }
+        
+        // 显示总结信息
+        if (importedCount > 0 || skippedCount > 0 || failedCount > 0) {
+          let summary = `导入完成！\n\n`;
+          if (importedCount > 0) summary += `✓ 成功导入: ${importedCount} 个角色\n`;
+          if (skippedCount > 0) summary += `○ 已跳过: ${skippedCount} 个文件\n`;
+          if (failedCount > 0) summary += `✗ 失败: ${failedCount} 个文件\n`;
+          
+          await showCustomAlert('批量导入结果', summary);
+        }
+        
+        resolve();
+      };
+      
+      input.click();
+    });
+  }
+
+  // 解析角色文件内容 (支持 .txt 和 .docx)
+  async function processCharacterFile(file) {
+      const fileName = file.name.toLowerCase();
+
+      // 处理 .txt 文件
+      if (fileName.endsWith('.txt')) {
+          return await file.text();
+      }
+
+      // 处理 .docx 文件 (依赖 mammoth.js)
+      if (fileName.endsWith('.docx')) {
+          if (typeof mammoth === 'undefined') {
+              throw new Error("未加载 mammoth.js 库，无法读取 Word 文档。");
+          }
+          
+          const arrayBuffer = await file.arrayBuffer();
+          
+          try {
+              // 方案 1: 尝试提取纯文本
+              const result = await mammoth.extractRawText({ arrayBuffer: arrayBuffer });
+              
+              if (result.value && result.value.trim()) {
+                  return result.value;
+              }
+              
+              // 如果纯文本为空，尝试转换为 HTML 再提取
+              const htmlResult = await mammoth.convertToHtml({ arrayBuffer: arrayBuffer });
+              if (htmlResult.value) {
+                  // 简单移除 HTML 标签
+                  const textContent = htmlResult.value.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+                  if (textContent) {
+                      return textContent;
+                  }
+              }
+              
+              throw new Error("DOCX 文件内容为空");
+              
+          } catch (error) {
+              console.error("DOCX 解析错误:", error);
+              // 提供更友好的错误提示
+              throw new Error(
+                  "无法解析此 DOCX 文件，可能原因：\n" +
+                  "1. 文件损坏或格式不标准\n" +
+                  "2. 文件使用了不兼容的 Word 功能\n\n" +
+                  "建议解决方案：\n" +
+                  "• 用 Word 打开文件，另存为新的 .docx\n" +
+                  "• 或者另存为 .txt 纯文本格式后再导入"
+              );
+          }
+      }
+
+      // 特别提示：不支持旧版 .doc 格式
+      if (fileName.endsWith('.doc')) {
+          throw new Error("不支持旧版 .doc 格式，请将文件另存为 .docx 或 .txt 格式后再导入。");
+      }
+
+      throw new Error("不支持的文件格式，仅支持 .txt 和 .docx");
+  }
+
+  // 处理ZIP文件导入
+  async function handleZipFileImport(zipFile) {
+    try {
+      // 检查JSZip是否可用
+      if (typeof JSZip === 'undefined') {
+        throw new Error("未加载 JSZip 库，无法解析 ZIP 文件。");
+      }
+
+      // 读取ZIP文件
+      const zip = await JSZip.loadAsync(zipFile);
+      
+      // 提取所有 .txt 和 .docx 文件
+      const fileEntries = [];
+      
+      for (const [filename, zipEntry] of Object.entries(zip.files)) {
+        // 跳过目录和隐藏文件
+        if (zipEntry.dir || filename.startsWith('__MACOSX') || filename.startsWith('.')) {
+          continue;
+        }
+        
+        const lowerName = filename.toLowerCase();
+        if (lowerName.endsWith('.txt') || lowerName.endsWith('.docx')) {
+          fileEntries.push({
+            filename: filename,
+            zipEntry: zipEntry,
+            type: lowerName.endsWith('.txt') ? 'txt' : 'docx'
+          });
+        }
+      }
+      
+      if (fileEntries.length === 0) {
+        await showCustomAlert('ZIP文件为空', `ZIP文件"${zipFile.name}"中没有找到 .txt 或 .docx 文件。`);
+        return;
+      }
+      
+      // 显示文件选择界面
+      const selectedFiles = await showZipFileSelectionModal(fileEntries, zipFile.name);
+      
+      if (!selectedFiles || selectedFiles.length === 0) {
+        return; // 用户取消或没有选择任何文件
+      }
+      
+      // 处理选中的文件
+      let importedCount = 0;
+      let skippedCount = 0;
+      let failedCount = 0;
+      
+      for (let i = 0; i < selectedFiles.length; i++) {
+        const entry = selectedFiles[i];
+        
+        try {
+          // 解析文件内容
+          let textContent;
+          
+          if (entry.type === 'txt') {
+            // 读取TXT文件
+            textContent = await entry.zipEntry.async('text');
+          } else if (entry.type === 'docx') {
+            // 读取DOCX文件
+            if (typeof mammoth === 'undefined') {
+              throw new Error("未加载 mammoth.js 库，无法读取 Word 文档。");
+            }
+            
+            const arrayBuffer = await entry.zipEntry.async('arraybuffer');
+            const result = await mammoth.extractRawText({ arrayBuffer: arrayBuffer });
+            
+            if (result.value && result.value.trim()) {
+              textContent = result.value;
+            } else {
+              // 尝试转换为HTML再提取
+              const htmlResult = await mammoth.convertToHtml({ arrayBuffer: arrayBuffer });
+              textContent = htmlResult.value.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+            }
+          }
+          
+          if (!textContent || !textContent.trim()) {
+            await showCustomAlert('文件内容为空', `文件"${entry.filename}"内容为空或无法解析，已跳过。`);
+            skippedCount++;
+            continue;
+          }
+          
+          // 显示内容确认弹窗
+          const action = await showMultiFileContentConfirmModal(
+            textContent,
+            entry.filename,
+            i + 1,
+            selectedFiles.length
+          );
+          
+          if (action === 'cancel') {
+            break;
+          } else if (action === 'skip') {
+            skippedCount++;
+            continue;
+          }
+          
+          // 创建角色流程
+          const remarkName = await showCustomPrompt(
+            `创建角色 [${i + 1}/${selectedFiles.length}] (第1/2步)`,
+            `文件: ${entry.filename}\n\n请输入你想为Ta设置的【备注名】(例如: 哥哥)`
+          );
+          
+          if (!remarkName || !remarkName.trim()) {
+            skippedCount++;
+            continue;
+          }
+          
+          const originalName = await showCustomPrompt(
+            `创建角色 [${i + 1}/${selectedFiles.length}] (第2/2步)`,
+            `文件: ${entry.filename}\n\n请输入Ta的【本名】(例如: 李星辰，这个名字将用于AI识别)`
+          );
+          
+          if (!originalName || !originalName.trim()) {
+            skippedCount++;
+            continue;
+          }
+          
+          // 创建新聊天
+          const newChatId = 'chat_' + Date.now() + '_' + i;
+          const newChat = {
+            id: newChatId,
+            name: remarkName.trim(),
+            originalName: originalName.trim(),
+            isGroup: false,
+            isPinned: false,
+            unreadCount: 0,
+            relationship: {
+              status: 'friend',
+              blockedTimestamp: null,
+              applicationReason: ''
+            },
+            status: {
+              text: '在线',
+              lastUpdate: Date.now(),
+              isBusy: false
+            },
+            settings: {
+              aiPersona: textContent.trim(),
+              myPersona: '我是谁呀。',
+              myNickname: '我',
+              maxMemory: 10,
+              aiAvatar: defaultAvatar,
+              myAvatar: defaultAvatar,
+              background: '',
+              theme: 'default',
+              fontSize: 13,
+              customCss: '',
+              linkedWorldBookIds: [],
+              aiAvatarLibrary: [],
+              myAvatarLibrary: [],
+              enableBackgroundActivity: true,
+              actionCooldownMinutes: 15,
+              enableTimePerception: true,
+              isOfflineMode: false,
+              offlineMinLength: 100,
+              offlineMaxLength: 300,
+              offlinePresetId: null,
+              timeZone: 'Asia/Shanghai'
+            },
+            history: [],
+            musicData: {
+              totalTime: 0
+            },
+            longTermMemory: [],
+            thoughtsHistory: []
+          };
+          
+          state.chats[newChatId] = newChat;
+          await db.chats.put(newChat);
+          importedCount++;
+          renderChatList();
+          
+        } catch (error) {
+          console.error(`文件"${entry.filename}"导入失败:`, error);
+          await showCustomAlert('文件导入失败', `文件"${entry.filename}"解析失败: ${error.message}`);
+          failedCount++;
+        }
+      }
+      
+      // 显示总结
+      if (importedCount > 0 || skippedCount > 0 || failedCount > 0) {
+        let summary = `ZIP文件导入完成！\n\n`;
+        if (importedCount > 0) summary += `✓ 成功导入: ${importedCount} 个角色\n`;
+        if (skippedCount > 0) summary += `○ 已跳过: ${skippedCount} 个文件\n`;
+        if (failedCount > 0) summary += `✗ 失败: ${failedCount} 个文件\n`;
+        
+        await showCustomAlert('ZIP导入结果', summary);
+      }
+      
+    } catch (error) {
+      console.error('ZIP文件处理失败:', error);
+      throw error;
+    }
+  }
+
+  // 显示ZIP文件选择界面
+  function showZipFileSelectionModal(fileEntries, zipFileName) {
+    return new Promise(resolve => {
+      const modal = document.createElement('div');
+      modal.className = 'custom-modal';
+      modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 10000;';
+      
+      const modalContent = document.createElement('div');
+      modalContent.style.cssText = 'background: white; border-radius: 12px; padding: 20px; max-width: 600px; width: 90%; max-height: 80vh; display: flex; flex-direction: column;';
+      
+      const title = document.createElement('h3');
+      title.textContent = 'ZIP文件导入 - 选择文件';
+      title.style.cssText = 'margin: 0 0 10px 0; font-size: 18px; text-align: center; color: #333;';
+      
+      const zipNameLabel = document.createElement('p');
+      zipNameLabel.textContent = `📦 ${zipFileName}`;
+      zipNameLabel.style.cssText = 'margin: 0 0 15px 0; text-align: center; font-size: 13px; color: #666; background: #f0f0f0; padding: 8px; border-radius: 6px; font-weight: 500;';
+      
+      const infoText = document.createElement('p');
+      infoText.textContent = `找到 ${fileEntries.length} 个可导入的文件，请选择要导入的文件：`;
+      infoText.style.cssText = 'margin: 0 0 12px 0; font-size: 14px; color: #555;';
+      
+      // 全选/取消全选按钮
+      const selectAllContainer = document.createElement('div');
+      selectAllContainer.style.cssText = 'display: flex; gap: 8px; margin-bottom: 12px; justify-content: flex-end;';
+      
+      const selectAllBtn = document.createElement('button');
+      selectAllBtn.textContent = '全选';
+      selectAllBtn.style.cssText = 'padding: 6px 12px; border: 1px solid #007AFF; border-radius: 6px; background: white; color: #007AFF; font-size: 13px; cursor: pointer;';
+      
+      const deselectAllBtn = document.createElement('button');
+      deselectAllBtn.textContent = '取消全选';
+      deselectAllBtn.style.cssText = 'padding: 6px 12px; border: 1px solid #999; border-radius: 6px; background: white; color: #666; font-size: 13px; cursor: pointer;';
+      
+      selectAllContainer.appendChild(selectAllBtn);
+      selectAllContainer.appendChild(deselectAllBtn);
+      
+      // 文件列表容器
+      const fileListContainer = document.createElement('div');
+      fileListContainer.style.cssText = 'flex: 1; overflow-y: auto; border: 1px solid #e0e0e0; border-radius: 8px; padding: 10px; margin-bottom: 15px; background: #fafafa; max-height: 400px;';
+      
+      const checkboxes = [];
+      
+      // 创建文件列表项
+      fileEntries.forEach((entry, index) => {
+        const fileItem = document.createElement('label');
+        fileItem.style.cssText = 'display: flex; align-items: center; padding: 10px; margin-bottom: 6px; background: white; border-radius: 6px; cursor: pointer; border: 1px solid #e0e0e0; transition: background 0.2s;';
+        
+        fileItem.onmouseover = () => fileItem.style.background = '#f0f8ff';
+        fileItem.onmouseout = () => fileItem.style.background = 'white';
+        
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.checked = true; // 默认全选
+        checkbox.style.cssText = 'width: 18px; height: 18px; margin-right: 10px; cursor: pointer;';
+        checkboxes.push(checkbox);
+        
+        const fileIcon = document.createElement('span');
+        fileIcon.textContent = entry.type === 'txt' ? '📄' : '📝';
+        fileIcon.style.cssText = 'font-size: 18px; margin-right: 8px;';
+        
+        const fileName = document.createElement('span');
+        fileName.textContent = entry.filename;
+        fileName.style.cssText = 'flex: 1; font-size: 13px; color: #333; word-break: break-all;';
+        
+        const fileType = document.createElement('span');
+        fileType.textContent = `.${entry.type}`;
+        fileType.style.cssText = 'font-size: 11px; color: #999; background: #f0f0f0; padding: 2px 6px; border-radius: 4px; margin-left: 8px;';
+        
+        fileItem.appendChild(checkbox);
+        fileItem.appendChild(fileIcon);
+        fileItem.appendChild(fileName);
+        fileItem.appendChild(fileType);
+        
+        fileListContainer.appendChild(fileItem);
+      });
+      
+      // 全选按钮事件
+      selectAllBtn.onclick = () => {
+        checkboxes.forEach(cb => cb.checked = true);
+      };
+      
+      // 取消全选按钮事件
+      deselectAllBtn.onclick = () => {
+        checkboxes.forEach(cb => cb.checked = false);
+      };
+      
+      // 计数显示
+      const countLabel = document.createElement('p');
+      countLabel.style.cssText = 'margin: 0 0 15px 0; text-align: center; font-size: 13px; color: #666;';
+      
+      const updateCount = () => {
+        const selectedCount = checkboxes.filter(cb => cb.checked).length;
+        countLabel.textContent = `已选择 ${selectedCount} / ${fileEntries.length} 个文件`;
+      };
+      
+      checkboxes.forEach(cb => cb.addEventListener('change', updateCount));
+      updateCount();
+      
+      // 按钮容器
+      const buttonContainer = document.createElement('div');
+      buttonContainer.style.cssText = 'display: flex; gap: 10px;';
+      
+      const cancelBtn = document.createElement('button');
+      cancelBtn.textContent = '取消';
+      cancelBtn.style.cssText = 'flex: 1; padding: 12px; border: none; border-radius: 8px; background: #ddd; font-size: 16px; cursor: pointer;';
+      cancelBtn.onclick = () => {
+        document.body.removeChild(modal);
+        resolve(null);
+      };
+      
+      const confirmBtn = document.createElement('button');
+      confirmBtn.textContent = '确认导入';
+      confirmBtn.style.cssText = 'flex: 1; padding: 12px; border: none; border-radius: 8px; background: #007AFF; color: white; font-size: 16px; cursor: pointer;';
+      confirmBtn.onclick = () => {
+        const selectedFiles = fileEntries.filter((entry, index) => checkboxes[index].checked);
+        
+        if (selectedFiles.length === 0) {
+          alert('请至少选择一个文件！');
+          return;
+        }
+        
+        document.body.removeChild(modal);
+        resolve(selectedFiles);
+      };
+      
+      buttonContainer.appendChild(cancelBtn);
+      buttonContainer.appendChild(confirmBtn);
+      
+      modalContent.appendChild(title);
+      modalContent.appendChild(zipNameLabel);
+      modalContent.appendChild(infoText);
+      modalContent.appendChild(selectAllContainer);
+      modalContent.appendChild(fileListContainer);
+      modalContent.appendChild(countLabel);
+      modalContent.appendChild(buttonContainer);
+      
+      modal.appendChild(modalContent);
+      document.body.appendChild(modal);
+    });
+  }
+
+  // 显示内容确认弹窗
+  function showContentConfirmModal(content) {
+    return new Promise(resolve => {
+      const modal = document.createElement('div');
+      modal.className = 'custom-modal';
+      modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 10000;';
+      
+      const modalContent = document.createElement('div');
+      modalContent.style.cssText = 'background: white; border-radius: 12px; padding: 20px; max-width: 500px; width: 90%; max-height: 70vh; display: flex; flex-direction: column;';
+      
+      const title = document.createElement('h3');
+      title.textContent = '内容确认';
+      title.style.cssText = 'margin: 0 0 15px 0; font-size: 18px; text-align: center;';
+      
+      const contentBox = document.createElement('div');
+      contentBox.style.cssText = 'flex: 1; overflow-y: auto; background: #f5f5f5; padding: 15px; border-radius: 8px; margin-bottom: 15px; white-space: pre-wrap; word-wrap: break-word; font-size: 14px; line-height: 1.6; max-height: 400px;';
+      contentBox.textContent = content;
+      
+      const question = document.createElement('p');
+      question.textContent = '是否将以上内容完全填入到对方人设中？';
+      question.style.cssText = 'margin: 0 0 15px 0; text-align: center; font-size: 15px;';
+      
+      const buttonContainer = document.createElement('div');
+      buttonContainer.style.cssText = 'display: flex; gap: 10px;';
+      
+      const cancelBtn = document.createElement('button');
+      cancelBtn.textContent = '取消';
+      cancelBtn.style.cssText = 'flex: 1; padding: 12px; border: none; border-radius: 8px; background: #ddd; font-size: 16px; cursor: pointer;';
+      cancelBtn.onclick = () => {
+        document.body.removeChild(modal);
+        resolve(false);
+      };
+      
+      const confirmBtn = document.createElement('button');
+      confirmBtn.textContent = '确定';
+      confirmBtn.style.cssText = 'flex: 1; padding: 12px; border: none; border-radius: 8px; background: #007AFF; color: white; font-size: 16px; cursor: pointer;';
+      confirmBtn.onclick = () => {
+        document.body.removeChild(modal);
+        resolve(true);
+      };
+      
+      buttonContainer.appendChild(cancelBtn);
+      buttonContainer.appendChild(confirmBtn);
+      
+      modalContent.appendChild(title);
+      modalContent.appendChild(contentBox);
+      modalContent.appendChild(question);
+      modalContent.appendChild(buttonContainer);
+      
+      modal.appendChild(modalContent);
+      document.body.appendChild(modal);
+    });
+  }
+
+  // 多文件导入专用的内容确认弹窗（支持跳过）
+  function showMultiFileContentConfirmModal(content, fileName, currentIndex, totalCount) {
+    return new Promise(resolve => {
+      const modal = document.createElement('div');
+      modal.className = 'custom-modal';
+      modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 10000;';
+      
+      const modalContent = document.createElement('div');
+      modalContent.style.cssText = 'background: white; border-radius: 12px; padding: 20px; max-width: 550px; width: 90%; max-height: 75vh; display: flex; flex-direction: column;';
+      
+      const title = document.createElement('h3');
+      title.textContent = `文件内容确认 [${currentIndex}/${totalCount}]`;
+      title.style.cssText = 'margin: 0 0 10px 0; font-size: 18px; text-align: center; color: #333;';
+      
+      const fileNameLabel = document.createElement('p');
+      fileNameLabel.textContent = `📄 ${fileName}`;
+      fileNameLabel.style.cssText = 'margin: 0 0 15px 0; text-align: center; font-size: 13px; color: #666; background: #f0f0f0; padding: 8px; border-radius: 6px; font-weight: 500;';
+      
+      const contentBox = document.createElement('div');
+      contentBox.style.cssText = 'flex: 1; overflow-y: auto; background: #f9f9f9; padding: 15px; border-radius: 8px; margin-bottom: 15px; white-space: pre-wrap; word-wrap: break-word; font-size: 13px; line-height: 1.6; max-height: 400px; border: 1px solid #e0e0e0;';
+      contentBox.textContent = content;
+      
+      const question = document.createElement('p');
+      question.innerHTML = '是否将以上内容填入到<strong>对方人设</strong>中？';
+      question.style.cssText = 'margin: 0 0 15px 0; text-align: center; font-size: 15px; color: #444;';
+      
+      const buttonContainer = document.createElement('div');
+      buttonContainer.style.cssText = 'display: flex; gap: 8px;';
+      
+      const cancelBtn = document.createElement('button');
+      cancelBtn.textContent = '取消全部';
+      cancelBtn.style.cssText = 'flex: 1; padding: 12px; border: none; border-radius: 8px; background: #e74c3c; color: white; font-size: 15px; cursor: pointer; transition: background 0.2s;';
+      cancelBtn.onmouseover = () => cancelBtn.style.background = '#c0392b';
+      cancelBtn.onmouseout = () => cancelBtn.style.background = '#e74c3c';
+      cancelBtn.onclick = () => {
+        document.body.removeChild(modal);
+        resolve('cancel');
+      };
+      
+      const skipBtn = document.createElement('button');
+      skipBtn.textContent = '跳过此文件';
+      skipBtn.style.cssText = 'flex: 1; padding: 12px; border: none; border-radius: 8px; background: #95a5a6; color: white; font-size: 15px; cursor: pointer; transition: background 0.2s;';
+      skipBtn.onmouseover = () => skipBtn.style.background = '#7f8c8d';
+      skipBtn.onmouseout = () => skipBtn.style.background = '#95a5a6';
+      skipBtn.onclick = () => {
+        document.body.removeChild(modal);
+        resolve('skip');
+      };
+      
+      const confirmBtn = document.createElement('button');
+      confirmBtn.textContent = '确定导入';
+      confirmBtn.style.cssText = 'flex: 1; padding: 12px; border: none; border-radius: 8px; background: #27ae60; color: white; font-size: 15px; cursor: pointer; transition: background 0.2s; font-weight: 600;';
+      confirmBtn.onmouseover = () => confirmBtn.style.background = '#229954';
+      confirmBtn.onmouseout = () => confirmBtn.style.background = '#27ae60';
+      confirmBtn.onclick = () => {
+        document.body.removeChild(modal);
+        resolve('confirm');
+      };
+      
+      buttonContainer.appendChild(cancelBtn);
+      buttonContainer.appendChild(skipBtn);
+      buttonContainer.appendChild(confirmBtn);
+      
+      modalContent.appendChild(title);
+      modalContent.appendChild(fileNameLabel);
+      modalContent.appendChild(contentBox);
+      modalContent.appendChild(question);
+      modalContent.appendChild(buttonContainer);
+      
+      modal.appendChild(modalContent);
+      document.body.appendChild(modal);
+      
+      // 支持键盘快捷键
+      const keyHandler = (e) => {
+        if (e.key === 'Escape') {
+          document.body.removeChild(modal);
+          document.removeEventListener('keydown', keyHandler);
+          resolve('skip');
+        }
+      };
+      document.addEventListener('keydown', keyHandler);
+    });
+  }
+
   function scrollToOriginalMessage(originalTimestamp) {
     const selector = `.message-bubble[data-timestamp="${originalTimestamp}"]`;
     const originalMessageBubble = document.querySelector(selector);
@@ -9255,6 +10005,17 @@ https://xx.com/4.jpg 疑惑`;
   }
   async function createMessageElement(msg, chat) {
 
+    // 【主屏幕QQ undefined过滤】如果是AI消息且内容为空或undefined，直接返回null不显示
+    if (msg.role === 'assistant' && msg.type !== 'recalled_message' && msg.type !== 'post_deleted_notice' && 
+        msg.type !== 'narration' && msg.type !== 'pat_message' && !msg.type?.startsWith('waimai_') && 
+        msg.type !== 'red_packet' && msg.type !== 'transfer' && msg.type !== 'poll' && msg.type !== 'gift' && 
+        msg.type !== 'kinship_request' && msg.type !== 'synth_music') {
+      const contentStr = String(msg.content || '').trim().toLowerCase();
+      if (contentStr === '' || contentStr === 'undefined') {
+        console.log('[QQ Undefined过滤] 已过滤空消息或undefined消息:', msg);
+        return null;
+      }
+    }
 
     if (msg.type === 'recalled_message') {
       const wrapper = document.createElement('div');
@@ -9840,6 +10601,10 @@ https://xx.com/4.jpg 疑惑`;
           contentHtml = `<img src="${processedByRule}" alt="${msg.meaning || 'Sticker'}" class="sticker-image">`;
         } else {
           let plainText = processMentions(processedByRule, chat);
+          // 【主屏幕QQ undefined过滤】应用undefined过滤器（仅对非用户消息）
+          if (!isUser && typeof qqUndefinedFilter !== 'undefined') {
+            plainText = qqUndefinedFilter(plainText);
+          }
           contentHtml = parseMarkdown(plainText).replace(/\n/g, '<br>');
         }
       }
@@ -26270,7 +27035,9 @@ case 'narration':
         aiAvatarLibrary: [],
         
        
-        alternateGreetings: alternateGreetings 
+        alternateGreetings: alternateGreetings,
+        myPhoneLockScreenEnabled: false,
+        myPhoneLockScreenPassword: ''
       },
       history: [],
       musicData: {
@@ -30966,6 +31733,20 @@ window.toggleReadingFullscreen = toggleReadingFullscreen;
 
   // MY Phone 相关变量
   let activeMyPhoneCharacterId = null;
+  
+  // MY Phone 锁屏状态
+  let myPhoneLockScreenState = {
+    passwordBuffer: '',
+    isLocked: false,
+    pendingCharacterId: null
+  };
+  
+  // MY Phone 删除模式相关状态
+  let myPhoneDeleteMode = {
+    active: false,
+    appType: null, // 'qq', 'album', 'browser', 'taobao', 'memo', 'diary', 'usage', 'music', 'amap'
+    selectedIndices: new Set()
+  };
 
   function openMyphoneScreen() {
     renderMyPhoneCharacterSelector();
@@ -30996,6 +31777,24 @@ window.toggleReadingFullscreen = toggleReadingFullscreen;
   }
 
   async function switchToMyPhoneCharacter(characterId) {
+    const char = state.chats[characterId];
+    if (!char) return;
+    
+    // 检查是否启用了MyPhone锁屏
+    if (char.settings.myPhoneLockScreenEnabled) {
+      // 保存待进入的角色ID
+      myPhoneLockScreenState.pendingCharacterId = characterId;
+      
+      // 显示锁屏界面
+      showMyPhoneLockScreen(char);
+      return;
+    }
+    
+    // 如果没有启用锁屏，直接进入
+    enterMyPhone(characterId);
+  }
+  
+  function enterMyPhone(characterId) {
     activeMyPhoneCharacterId = characterId;
     console.log(`已切换到角色 ${characterId} 查看我的手机`);
 
@@ -31025,11 +31824,400 @@ window.toggleReadingFullscreen = toggleReadingFullscreen;
   }
 
   function openMyPhoneSettings() {
+    // 回显设置
+    const char = state.chats[activeMyPhoneCharacterId];
+    if (char) {
+      const toggle = document.getElementById('myphone-lock-screen-toggle');
+      const detail = document.getElementById('myphone-lock-screen-settings-detail');
+      const passwordInput = document.getElementById('myphone-lock-screen-password-input');
+      
+      if (toggle) {
+        toggle.checked = char.settings.myPhoneLockScreenEnabled || false;
+        if (detail) {
+          detail.style.display = toggle.checked ? 'block' : 'none';
+        }
+      }
+      
+      if (passwordInput) {
+        passwordInput.value = char.settings.myPhoneLockScreenPassword || '';
+      }
+    }
+    
     switchToMyPhoneScreen('myphone-settings-screen');
+  }
+  
+  function showMyPhoneLockScreen(char) {
+    const lockScreen = document.getElementById('lock-screen');
+    
+    // 设置壁纸（使用主屏幕的锁屏壁纸）
+    if (state.globalSettings.lockScreenWallpaper) {
+      lockScreen.style.backgroundImage = `url(${state.globalSettings.lockScreenWallpaper})`;
+    } else {
+      lockScreen.style.backgroundImage = 'linear-gradient(135deg, #1c1c1e, #3a3a3c)';
+    }
+    
+    // 标记为MyPhone锁屏模式
+    myPhoneLockScreenState.isLocked = true;
+    lockScreen.classList.add('active');
+    lockScreen.classList.add('myphone-lock-mode');
+    
+    // 更新时钟
+    updateMyPhoneLockScreenClock();
+  }
+  
+  function updateMyPhoneLockScreenClock() {
+    if (!myPhoneLockScreenState.isLocked) return;
+    
+    const now = new Date();
+    const timeString = now.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false });
+    const dateString = now.toLocaleDateString('zh-CN', { month: 'long', day: 'numeric', weekday: 'long' });
+    
+    document.getElementById('lock-time').textContent = timeString;
+    document.getElementById('lock-date').textContent = dateString;
+  }
+  
+  function showMyPhonePasswordInput() {
+    const lockScreen = document.getElementById('lock-screen');
+    const passwordArea = document.getElementById('lock-password-area');
+    
+    lockScreen.classList.add('input-mode');
+    passwordArea.style.display = 'flex';
+    myPhoneLockScreenState.passwordBuffer = '';
+    updateMyPhoneLockDots();
+  }
+  
+  function hideMyPhonePasswordInput() {
+    const lockScreen = document.getElementById('lock-screen');
+    const passwordArea = document.getElementById('lock-password-area');
+    
+    lockScreen.classList.remove('input-mode');
+    passwordArea.style.display = 'none';
+    myPhoneLockScreenState.passwordBuffer = '';
+  }
+  
+  function updateMyPhoneLockDots() {
+    const dots = document.querySelectorAll('.lock-dots .dot');
+    const len = myPhoneLockScreenState.passwordBuffer.length;
+    dots.forEach((dot, index) => {
+      if (index < len) dot.classList.add('filled');
+      else dot.classList.remove('filled');
+    });
+  }
+  
+  function checkMyPhoneLockPassword() {
+    const characterId = myPhoneLockScreenState.pendingCharacterId;
+    if (!characterId) return;
+    
+    const char = state.chats[characterId];
+    if (!char) return;
+    
+    const correctPassword = char.settings.myPhoneLockScreenPassword;
+    
+    if (myPhoneLockScreenState.passwordBuffer === correctPassword) {
+      // 解锁成功
+      const lockScreen = document.getElementById('lock-screen');
+      lockScreen.classList.add('unlocking');
+      myPhoneLockScreenState.isLocked = false;
+      
+      setTimeout(() => {
+        lockScreen.classList.remove('active');
+        lockScreen.classList.remove('unlocking');
+        lockScreen.classList.remove('myphone-lock-mode');
+        hideMyPhonePasswordInput();
+        
+        // 进入MyPhone
+        enterMyPhone(characterId);
+        myPhoneLockScreenState.pendingCharacterId = null;
+      }, 500);
+    } else {
+      // 解锁失败
+      const dots = document.querySelector('.lock-dots');
+      dots.classList.add('shake-animation');
+      if(navigator.vibrate) navigator.vibrate(200);
+      
+      setTimeout(() => {
+        dots.classList.remove('shake-animation');
+        myPhoneLockScreenState.passwordBuffer = '';
+        updateMyPhoneLockDots();
+      }, 400);
+    }
   }
 
   function openMyPhoneViewRecords() {
     switchToMyPhoneScreen('myphone-view-records-screen');
+  }
+
+  // MY Phone 删除模式功能
+  function toggleMyPhoneDeleteMode(appType) {
+    if (myPhoneDeleteMode.active && myPhoneDeleteMode.appType === appType) {
+      // 退出删除模式
+      exitMyPhoneDeleteMode();
+    } else {
+      // 进入删除模式
+      enterMyPhoneDeleteMode(appType);
+    }
+  }
+
+  function enterMyPhoneDeleteMode(appType) {
+    myPhoneDeleteMode.active = true;
+    myPhoneDeleteMode.appType = appType;
+    myPhoneDeleteMode.selectedIndices.clear();
+    
+    // 更新按钮UI - 添加删除模式工具栏
+    const screen = document.getElementById(`myphone-${appType}-screen`);
+    if (!screen) return;
+    
+    const header = screen.querySelector('.header');
+    if (!header) return;
+    
+    // 隐藏其他按钮，只显示返回按钮
+    const actionBtns = header.querySelectorAll('.action-btn');
+    actionBtns.forEach(btn => btn.style.display = 'none');
+    
+    // 创建删除模式工具栏
+    let deleteToolbar = header.querySelector('.delete-mode-toolbar');
+    if (!deleteToolbar) {
+      deleteToolbar = document.createElement('div');
+      deleteToolbar.className = 'delete-mode-toolbar';
+      deleteToolbar.style.cssText = 'display: flex; gap: 8px; align-items: center;';
+      deleteToolbar.innerHTML = `
+        <button class="delete-mode-btn" onclick="selectAllMyPhoneItems()" style="padding: 6px 12px; border: none; background: var(--accent-color); color: white; border-radius: 6px; cursor: pointer; font-size: 14px;">全选</button>
+        <button class="delete-mode-btn" onclick="confirmDeleteMyPhoneItems()" style="padding: 6px 12px; border: none; background: #ff4444; color: white; border-radius: 6px; cursor: pointer; font-size: 14px;">删除</button>
+        <button class="delete-mode-btn" onclick="exitMyPhoneDeleteMode()" style="padding: 6px 12px; border: none; background: var(--secondary-bg); color: var(--text-color); border-radius: 6px; cursor: pointer; font-size: 14px;">取消</button>
+      `;
+      header.appendChild(deleteToolbar);
+    }
+    deleteToolbar.style.display = 'flex';
+    
+    // 重新渲染列表以显示复选框
+    rerenderMyPhoneApp(appType);
+  }
+
+  function exitMyPhoneDeleteMode() {
+    if (!myPhoneDeleteMode.active) return;
+    
+    const appType = myPhoneDeleteMode.appType;
+    myPhoneDeleteMode.active = false;
+    myPhoneDeleteMode.appType = null;
+    myPhoneDeleteMode.selectedIndices.clear();
+    
+    // 恢复按钮UI
+    const screen = document.getElementById(`myphone-${appType}-screen`);
+    if (!screen) return;
+    
+    const header = screen.querySelector('.header');
+    if (!header) return;
+    
+    // 恢复显示操作按钮
+    const actionBtns = header.querySelectorAll('.action-btn');
+    actionBtns.forEach(btn => btn.style.display = '');
+    
+    // 隐藏删除模式工具栏
+    const deleteToolbar = header.querySelector('.delete-mode-toolbar');
+    if (deleteToolbar) {
+      deleteToolbar.style.display = 'none';
+    }
+    
+    // 重新渲染列表以隐藏复选框
+    rerenderMyPhoneApp(appType);
+  }
+  // 将函数暴露到全局作用域
+  window.exitMyPhoneDeleteMode = exitMyPhoneDeleteMode;
+
+  function selectAllMyPhoneItems() {
+    if (!myPhoneDeleteMode.active) return;
+    
+    const appType = myPhoneDeleteMode.appType;
+    const char = state.chats[activeMyPhoneCharacterId];
+    if (!char) return;
+    
+    let items = [];
+    switch(appType) {
+      case 'qq':
+        items = char.myPhoneSimulatedQQConversations || [];
+        break;
+      case 'album':
+        items = char.myPhoneAlbum || [];
+        break;
+      case 'browser':
+        items = char.myPhoneBrowserHistory || [];
+        break;
+      case 'taobao':
+        items = char.myPhoneTaobaoHistory || [];
+        break;
+      case 'memo':
+        items = char.myPhoneMemos || [];
+        break;
+      case 'diary':
+        items = char.myPhoneDiaries || [];
+        break;
+      case 'usage':
+        items = char.myPhoneAppUsageLog || [];
+        break;
+      case 'music':
+        items = char.myPhoneMusicPlaylist || [];
+        break;
+      case 'amap':
+        items = char.myPhoneAmapHistory || [];
+        break;
+    }
+    
+    // 判断是全选还是取消全选
+    const allSelected = myPhoneDeleteMode.selectedIndices.size === items.length;
+    
+    if (allSelected) {
+      // 取消全选
+      myPhoneDeleteMode.selectedIndices.clear();
+    } else {
+      // 全选
+      myPhoneDeleteMode.selectedIndices.clear();
+      items.forEach((_, idx) => myPhoneDeleteMode.selectedIndices.add(idx));
+    }
+    
+    // 更新复选框状态
+    updateMyPhoneCheckboxStates();
+  }
+  // 将函数暴露到全局作用域
+  window.selectAllMyPhoneItems = selectAllMyPhoneItems;
+
+  function toggleMyPhoneItemSelection(index) {
+    if (!myPhoneDeleteMode.active) return;
+    
+    if (myPhoneDeleteMode.selectedIndices.has(index)) {
+      myPhoneDeleteMode.selectedIndices.delete(index);
+    } else {
+      myPhoneDeleteMode.selectedIndices.add(index);
+    }
+    
+    // 更新复选框状态
+    updateMyPhoneCheckboxStates();
+  }
+
+  function updateMyPhoneCheckboxStates() {
+    const checkboxes = document.querySelectorAll('.myphone-delete-checkbox');
+    checkboxes.forEach(checkbox => {
+      const index = parseInt(checkbox.dataset.index);
+      checkbox.checked = myPhoneDeleteMode.selectedIndices.has(index);
+    });
+  }
+
+  async function confirmDeleteMyPhoneItems() {
+    if (!myPhoneDeleteMode.active || myPhoneDeleteMode.selectedIndices.size === 0) {
+      showCustomAlert('提示', '请至少选择一项要删除的内容');
+      return;
+    }
+    
+    const count = myPhoneDeleteMode.selectedIndices.size;
+    const confirmed = await showCustomConfirm('确认删除', `确定要删除选中的 ${count} 项内容吗？`);
+    
+    if (!confirmed) return;
+    
+    const appType = myPhoneDeleteMode.appType;
+    const char = state.chats[activeMyPhoneCharacterId];
+    if (!char) return;
+    
+    // 获取要删除的索引数组，从大到小排序（避免删除时索引变化）
+    const indicesToDelete = Array.from(myPhoneDeleteMode.selectedIndices).sort((a, b) => b - a);
+    
+    // 根据appType删除对应的数据
+    switch(appType) {
+      case 'qq':
+        if (!char.myPhoneSimulatedQQConversations) char.myPhoneSimulatedQQConversations = [];
+        indicesToDelete.forEach(idx => {
+          char.myPhoneSimulatedQQConversations.splice(idx, 1);
+        });
+        break;
+      case 'album':
+        if (!char.myPhoneAlbum) char.myPhoneAlbum = [];
+        indicesToDelete.forEach(idx => {
+          char.myPhoneAlbum.splice(idx, 1);
+        });
+        break;
+      case 'browser':
+        if (!char.myPhoneBrowserHistory) char.myPhoneBrowserHistory = [];
+        indicesToDelete.forEach(idx => {
+          char.myPhoneBrowserHistory.splice(idx, 1);
+        });
+        break;
+      case 'taobao':
+        if (!char.myPhoneTaobaoHistory) char.myPhoneTaobaoHistory = [];
+        indicesToDelete.forEach(idx => {
+          char.myPhoneTaobaoHistory.splice(idx, 1);
+        });
+        break;
+      case 'memo':
+        if (!char.myPhoneMemos) char.myPhoneMemos = [];
+        indicesToDelete.forEach(idx => {
+          char.myPhoneMemos.splice(idx, 1);
+        });
+        break;
+      case 'diary':
+        if (!char.myPhoneDiaries) char.myPhoneDiaries = [];
+        indicesToDelete.forEach(idx => {
+          char.myPhoneDiaries.splice(idx, 1);
+        });
+        break;
+      case 'usage':
+        if (!char.myPhoneAppUsageLog) char.myPhoneAppUsageLog = [];
+        indicesToDelete.forEach(idx => {
+          char.myPhoneAppUsageLog.splice(idx, 1);
+        });
+        break;
+      case 'music':
+        if (!char.myPhoneMusicPlaylist) char.myPhoneMusicPlaylist = [];
+        indicesToDelete.forEach(idx => {
+          char.myPhoneMusicPlaylist.splice(idx, 1);
+        });
+        break;
+      case 'amap':
+        if (!char.myPhoneAmapHistory) char.myPhoneAmapHistory = [];
+        indicesToDelete.forEach(idx => {
+          char.myPhoneAmapHistory.splice(idx, 1);
+        });
+        break;
+    }
+    
+    // 保存数据到数据库
+    await db.chats.put(char);
+    
+    // 退出删除模式并刷新列表
+    exitMyPhoneDeleteMode();
+    
+    showCustomAlert('成功', `已删除 ${count} 项内容`);
+  }
+  // 将函数暴露到全局作用域
+  window.confirmDeleteMyPhoneItems = confirmDeleteMyPhoneItems;
+
+  function rerenderMyPhoneApp(appType) {
+    switch(appType) {
+      case 'qq':
+        renderMyPhoneSimulatedQQ();
+        break;
+      case 'album':
+        renderMyPhoneAlbum();
+        break;
+      case 'browser':
+        renderMyPhoneBrowserHistory();
+        break;
+      case 'taobao':
+        renderMyPhoneTaobao();
+        break;
+      case 'memo':
+        renderMyPhoneMemoList();
+        break;
+      case 'diary':
+        renderMyPhoneDiaryList();
+        break;
+      case 'usage':
+        renderMyPhoneAppUsage();
+        break;
+      case 'music':
+        renderMyPhoneMusicScreen();
+        break;
+      case 'amap':
+        renderMyPhoneAmap();
+        break;
+    }
   }
 
   // MY Phone 添加联系人选择弹窗
@@ -33405,6 +34593,72 @@ ${historySlice.map(msg => `${msg.role === 'user' ? myNickname : chat.name}: ${St
     messagesContainer.scrollTop = newScrollHeight - oldScrollHeight;
 
     isLoadingMoreCphoneMessages = false;
+  }
+
+  async function loadMoreMyPhoneMessages() {
+    if (isLoadingMoreMyPhoneMessages || !activeMyPhoneCharacterId) return;
+    isLoadingMoreMyPhoneMessages = true;
+
+    const messagesContainer = document.getElementById('myphone-conversation-messages');
+    const char = state.chats[activeMyPhoneCharacterId];
+    if (!char) {
+      isLoadingMoreMyPhoneMessages = false;
+      return;
+    }
+
+    // 只有在查看真实对话（index === -1）时才支持滚动加载
+    if (myphoneActiveConversationIndex !== -1) {
+      isLoadingMoreMyPhoneMessages = false;
+      return;
+    }
+
+    showLoader(messagesContainer, 'top');
+    const oldScrollHeight = messagesContainer.scrollHeight;
+
+    await new Promise(resolve => setTimeout(resolve, 500));
+
+    const totalMessages = char.history.filter(m => !m.isHidden).length;
+    const renderWindow = state.globalSettings.chatRenderWindow || 50;
+    const nextSliceEnd = totalMessages - myphoneRenderedCount;
+    const nextSliceStart = Math.max(0, nextSliceEnd - renderWindow);
+
+    const allVisibleMessages = char.history.filter(m => !m.isHidden);
+    const messagesToPrepend = allVisibleMessages.slice(nextSliceStart, nextSliceEnd);
+
+    hideLoader(messagesContainer);
+
+    if (messagesToPrepend.length === 0) {
+      isLoadingMoreMyPhoneMessages = false;
+      return;
+    }
+
+    // 创建临时聊天对象用于渲染（角色视角）
+    const tempChatObject = {
+      id: 'temp_myphone_user_chat',
+      isGroup: false,
+      name: state.qzoneSettings.nickname || '我',
+      settings: {
+        ...char.settings,
+        myAvatar: char.settings.myAvatar || defaultAvatar,
+        myAvatarFrame: char.settings.myAvatarFrame || '',
+        aiAvatar: char.settings.aiAvatar || defaultAvatar,
+        aiAvatarFrame: char.settings.aiAvatarFrame || ''
+      }
+    };
+
+    for (const msg of messagesToPrepend.reverse()) {
+      const messageEl = await createMessageElement(msg, tempChatObject);
+      if (messageEl) {
+        messagesContainer.prepend(messageEl);
+      }
+    }
+
+    myphoneRenderedCount += messagesToPrepend.length;
+
+    const newScrollHeight = messagesContainer.scrollHeight;
+    messagesContainer.scrollTop = newScrollHeight - oldScrollHeight;
+
+    isLoadingMoreMyPhoneMessages = false;
   }
 
   async function openCharSimulatedConversation(conversationIndex) {
@@ -44807,16 +46061,41 @@ async function renderMyPhoneSimulatedQQ() {
     const item = document.createElement('div');
     item.className = 'chat-list-item';
     item.dataset.conversationIndex = idx;
-    item.innerHTML = `
-      <img src="${conv.avatar || defaultAvatar}" class="avatar">
-      <div class="info">
-        <div class="name-line">
-          <span class="name">${conv.name}</span>
+    
+    // 检查是否在删除模式下
+    const isDeleteMode = myPhoneDeleteMode.active && myPhoneDeleteMode.appType === 'qq';
+    
+    if (isDeleteMode) {
+      item.innerHTML = `
+        <input type="checkbox" class="myphone-delete-checkbox" data-index="${idx}" style="width: 20px; height: 20px; margin-right: 10px; cursor: pointer;" onchange="toggleMyPhoneItemSelection(${idx})">
+        <img src="${conv.avatar || defaultAvatar}" class="avatar">
+        <div class="info">
+          <div class="name-line">
+            <span class="name">${conv.name}</span>
+          </div>
+          <div class="last-msg">${conv.lastMessage || '...'}</div>
         </div>
-        <div class="last-msg">${conv.lastMessage || '...'}</div>
-      </div>
-    `;
-    item.addEventListener('click', () => openMyPhoneConversation(idx));
+      `;
+      // 在删除模式下，点击项目本身也会切换选中状态
+      item.addEventListener('click', (e) => {
+        if (e.target.classList.contains('myphone-delete-checkbox')) return;
+        toggleMyPhoneItemSelection(idx);
+        const checkbox = item.querySelector('.myphone-delete-checkbox');
+        if (checkbox) checkbox.checked = myPhoneDeleteMode.selectedIndices.has(idx);
+      });
+    } else {
+      item.innerHTML = `
+        <img src="${conv.avatar || defaultAvatar}" class="avatar">
+        <div class="info">
+          <div class="name-line">
+            <span class="name">${conv.name}</span>
+          </div>
+          <div class="last-msg">${conv.lastMessage || '...'}</div>
+        </div>
+      `;
+      item.addEventListener('click', () => openMyPhoneConversation(idx));
+    }
+    
     listEl.appendChild(item);
   });
 
@@ -44829,21 +46108,17 @@ async function openMyPhoneConversation(index) {
 
   // 保存当前对话索引
   window.currentMyPhoneConversationIndex = index;
+  myphoneActiveConversationIndex = index;
 
   const messagesEl = document.getElementById('myphone-conversation-messages');
   messagesEl.innerHTML = '';
-  
-  // 设置背景色和padding
-  const isDarkMode = document.getElementById('phone-screen').classList.contains('dark-mode');
-  messagesEl.style.backgroundColor = isDarkMode ? '#000000' : '#f0f2f5';
-  messagesEl.style.padding = '10px';
   messagesEl.dataset.theme = char.settings.theme || 'default';
 
   let partnerName, messages, tempChatObject;
   const settingsBtn = document.getElementById('myphone-conversation-settings-btn');
   
   if (index === -1) {
-    // 与角色的真实对话 - 不显示设置按钮
+    // 与角色的真实对话 - 不显示设置按钮，使用渲染窗口机制
     partnerName = char.name;
     settingsBtn.style.display = 'none';
     
@@ -44861,7 +46136,15 @@ async function openMyPhoneConversation(index) {
       }
     };
     
-    messages = char.history.filter(m => !m.isHidden);
+    // ✨ 使用渲染窗口机制，只渲染最近的消息
+    myphoneRenderedCount = 0;
+    isLoadingMoreMyPhoneMessages = false;
+    
+    const allVisibleMessages = char.history.filter(m => !m.isHidden);
+    const renderWindow = state.globalSettings.chatRenderWindow || 50;
+    const initialMessages = allVisibleMessages.slice(-renderWindow);
+    messages = initialMessages;
+    myphoneRenderedCount = initialMessages.length;
   } else {
     // 模拟对话 - 显示设置按钮
     const conv = char.myPhoneSimulatedQQConversations[index];
@@ -44890,12 +46173,10 @@ async function openMyPhoneConversation(index) {
 
   document.getElementById('myphone-conversation-partner-name').textContent = partnerName;
 
-  // 使用createMessageElement渲染每条消息
+  // 使用createMessageElement渲染每条消息（与cphone渲染方式一致）
   for (const msg of messages) {
     const messageEl = await createMessageElement(msg, tempChatObject);
     if (messageEl) {
-      // 添加底部间距
-      messageEl.style.marginBottom = '10px';
       messagesEl.appendChild(messageEl);
     }
   }
@@ -44918,12 +46199,26 @@ async function renderMyPhoneAlbum() {
   }
 
   const fallbackImageUrl = `https://i.postimg.cc/KYr2qRCK/1.jpg`;
+  const isDeleteMode = myPhoneDeleteMode.active && myPhoneDeleteMode.appType === 'album';
 
-  photos.forEach(photo => {
+  photos.forEach((photo, idx) => {
     const item = document.createElement('div');
     item.className = 'char-photo-item';
     item.dataset.description = photo.description;
+    item.style.position = 'relative';
     gridEl.appendChild(item);
+
+    // 添加复选框（如果在删除模式下）
+    if (isDeleteMode) {
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.className = 'myphone-delete-checkbox';
+      checkbox.dataset.index = idx;
+      checkbox.checked = myPhoneDeleteMode.selectedIndices.has(idx);
+      checkbox.style.cssText = 'position: absolute; top: 8px; right: 8px; width: 24px; height: 24px; cursor: pointer; z-index: 10;';
+      checkbox.onchange = () => toggleMyPhoneItemSelection(idx);
+      item.appendChild(checkbox);
+    }
 
     if (state.globalSettings.enableAiDrawing) {
       item.style.backgroundColor = '#e9ecef';
@@ -44949,9 +46244,19 @@ async function renderMyPhoneAlbum() {
       item.appendChild(descriptionEl);
     }
 
-    item.addEventListener('click', () => {
-      showCustomAlert('照片描述', photo.description || '无描述');
-    });
+    if (isDeleteMode) {
+      // 在删除模式下，点击项目切换选中状态
+      item.addEventListener('click', (e) => {
+        if (e.target.classList.contains('myphone-delete-checkbox')) return;
+        toggleMyPhoneItemSelection(idx);
+        const checkbox = item.querySelector('.myphone-delete-checkbox');
+        if (checkbox) checkbox.checked = myPhoneDeleteMode.selectedIndices.has(idx);
+      });
+    } else {
+      item.addEventListener('click', () => {
+        showCustomAlert('照片描述', photo.description || '无描述');
+      });
+    }
   });
 }
 
@@ -44970,6 +46275,7 @@ function renderMyPhoneBrowserHistory() {
 
   const globeIcon = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>`;
   const arrowIcon = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>`;
+  const isDeleteMode = myPhoneDeleteMode.active && myPhoneDeleteMode.appType === 'browser';
 
   history.forEach((item, index) => {
     const entryEl = document.createElement('div');
@@ -44978,7 +46284,9 @@ function renderMyPhoneBrowserHistory() {
     let cleanUrl = item.url.replace(/^https?:\/\//, '').replace(/^www\./, '');
     if(cleanUrl.length > 25) cleanUrl = cleanUrl.substring(0, 25) + '...';
 
-    entryEl.innerHTML = `
+    if (isDeleteMode) {
+      entryEl.innerHTML = `
+        <input type="checkbox" class="myphone-delete-checkbox" data-index="${index}" style="width: 20px; height: 20px; margin-right: 10px; cursor: pointer;" onchange="toggleMyPhoneItemSelection(${index})">
         <div class="char-browser-icon-box">
             ${globeIcon}
         </div>
@@ -44989,9 +46297,29 @@ function renderMyPhoneBrowserHistory() {
         <div class="char-browser-arrow">
             ${arrowIcon}
         </div>
-    `;
+      `;
+      entryEl.addEventListener('click', (e) => {
+        if (e.target.classList.contains('myphone-delete-checkbox')) return;
+        toggleMyPhoneItemSelection(index);
+        const checkbox = entryEl.querySelector('.myphone-delete-checkbox');
+        if (checkbox) checkbox.checked = myPhoneDeleteMode.selectedIndices.has(index);
+      });
+    } else {
+      entryEl.innerHTML = `
+        <div class="char-browser-icon-box">
+            ${globeIcon}
+        </div>
+        <div class="char-browser-content">
+            <div class="char-browser-title">${item.title}</div>
+            <div class="char-browser-url">${cleanUrl}</div>
+        </div>
+        <div class="char-browser-arrow">
+            ${arrowIcon}
+        </div>
+      `;
+      entryEl.addEventListener('click', () => openMyPhoneArticle(index));
+    }
 
-    entryEl.addEventListener('click', () => openMyPhoneArticle(index));
     listEl.appendChild(entryEl);
   });
 
@@ -45027,10 +46355,13 @@ function renderMyPhoneTaobao() {
     return;
   }
 
-  items.forEach(item => {
+  const isDeleteMode = myPhoneDeleteMode.active && myPhoneDeleteMode.appType === 'taobao';
+
+  items.forEach((item, idx) => {
     const itemEl = document.createElement('div');
     itemEl.className = 'char-product-item';
     itemEl.dataset.reason = item.reason || item.thought;
+    itemEl.style.position = 'relative';
 
     let imageOrTextHtml;
     // 如果用户选择了使用AI生成图片
@@ -45053,7 +46384,14 @@ function renderMyPhoneTaobao() {
       `;
     }
 
+    // 添加复选框（如果在删除模式下）
+    let checkboxHtml = '';
+    if (isDeleteMode) {
+      checkboxHtml = `<input type="checkbox" class="myphone-delete-checkbox" data-index="${idx}" style="position: absolute; top: 8px; right: 8px; width: 24px; height: 24px; cursor: pointer; z-index: 10;" onchange="toggleMyPhoneItemSelection(${idx})">`;
+    }
+
     itemEl.innerHTML = `
+      ${checkboxHtml}
       ${imageOrTextHtml}
       <div class="product-info">
         <div class="product-name">${item.name}</div>
@@ -45064,11 +46402,21 @@ function renderMyPhoneTaobao() {
       </div>
     `;
 
-    // 添加点击事件显示购买想法
-    itemEl.addEventListener('click', () => {
-      const thought = item.thought || item.reason || '无想法记录';
-      showCustomAlert('购买想法', thought);
-    });
+    if (isDeleteMode) {
+      // 在删除模式下，点击项目切换选中状态
+      itemEl.addEventListener('click', (e) => {
+        if (e.target.classList.contains('myphone-delete-checkbox')) return;
+        toggleMyPhoneItemSelection(idx);
+        const checkbox = itemEl.querySelector('.myphone-delete-checkbox');
+        if (checkbox) checkbox.checked = myPhoneDeleteMode.selectedIndices.has(idx);
+      });
+    } else {
+      // 添加点击事件显示购买想法
+      itemEl.addEventListener('click', () => {
+        const thought = item.thought || item.reason || '无想法记录';
+        showCustomAlert('购买想法', thought);
+      });
+    }
 
     gridEl.appendChild(itemEl);
   });
@@ -45089,6 +46437,7 @@ function renderMyPhoneMemoList() {
   const memoIconSVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>`;
   // SVG 图标: 右箭头
   const arrowIcon = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>`;
+  const isDeleteMode = myPhoneDeleteMode.active && myPhoneDeleteMode.appType === 'memo';
 
   memos.forEach((memo, index) => {
     const item = document.createElement('div');
@@ -45096,21 +46445,44 @@ function renderMyPhoneMemoList() {
     
     // 获取内容预览 (第一行)
     const previewText = (memo.content || '').split('\n')[0].substring(0, 50) || '无内容';
+    const actualIndex = memos.length - 1 - index; // 实际数据索引
 
-    item.innerHTML = `
-      <div class="cphone-item-icon-box memo-icon-style">
-        ${memoIconSVG}
-      </div>
-      <div class="cphone-item-info">
-        <div class="cphone-item-title">${memo.title}</div>
-        <div class="cphone-item-preview">${previewText}</div>
-      </div>
-      <div class="cphone-item-arrow">
-        ${arrowIcon}
-      </div>
-    `;
+    if (isDeleteMode) {
+      item.innerHTML = `
+        <input type="checkbox" class="myphone-delete-checkbox" data-index="${actualIndex}" style="width: 20px; height: 20px; margin-right: 10px; cursor: pointer;" onchange="toggleMyPhoneItemSelection(${actualIndex})">
+        <div class="cphone-item-icon-box memo-icon-style">
+          ${memoIconSVG}
+        </div>
+        <div class="cphone-item-info">
+          <div class="cphone-item-title">${memo.title}</div>
+          <div class="cphone-item-preview">${previewText}</div>
+        </div>
+        <div class="cphone-item-arrow">
+          ${arrowIcon}
+        </div>
+      `;
+      item.addEventListener('click', (e) => {
+        if (e.target.classList.contains('myphone-delete-checkbox')) return;
+        toggleMyPhoneItemSelection(actualIndex);
+        const checkbox = item.querySelector('.myphone-delete-checkbox');
+        if (checkbox) checkbox.checked = myPhoneDeleteMode.selectedIndices.has(actualIndex);
+      });
+    } else {
+      item.innerHTML = `
+        <div class="cphone-item-icon-box memo-icon-style">
+          ${memoIconSVG}
+        </div>
+        <div class="cphone-item-info">
+          <div class="cphone-item-title">${memo.title}</div>
+          <div class="cphone-item-preview">${previewText}</div>
+        </div>
+        <div class="cphone-item-arrow">
+          ${arrowIcon}
+        </div>
+      `;
+      item.addEventListener('click', () => openMyPhoneMemo(actualIndex));
+    }
     
-    item.addEventListener('click', () => openMyPhoneMemo(memos.length - 1 - index));
     listEl.appendChild(item);
   });
 
@@ -45146,26 +46518,52 @@ function renderMyPhoneDiaryList() {
   // SVG 图标: 右箭头
   const arrowIcon = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>`;
 
+  const isDeleteMode = myPhoneDeleteMode.active && myPhoneDeleteMode.appType === 'diary';
+
   diaries.forEach((diary, index) => {
     const item = document.createElement('div');
     item.className = 'diary-item';
     
     // 使用diary.date作为日期显示
     const dateStr = diary.date || new Date().toLocaleDateString('zh-CN');
+    const actualIndex = diaries.length - 1 - index; // 实际数据索引
 
-    item.innerHTML = `
-      <div class="cphone-item-icon-box diary-icon-style">
-        ${diaryIconSVG}
-      </div>
-      <div class="cphone-item-info">
-        <div class="cphone-item-title">${diary.title}</div>
-        <div class="cphone-item-preview">${dateStr}</div>
-      </div>
-      <div class="cphone-item-arrow">
-        ${arrowIcon}
-      </div>
-    `;
-    item.addEventListener('click', () => openMyPhoneDiary(diaries.length - 1 - index));
+    if (isDeleteMode) {
+      item.innerHTML = `
+        <input type="checkbox" class="myphone-delete-checkbox" data-index="${actualIndex}" style="width: 20px; height: 20px; margin-right: 10px; cursor: pointer;" onchange="toggleMyPhoneItemSelection(${actualIndex})">
+        <div class="cphone-item-icon-box diary-icon-style">
+          ${diaryIconSVG}
+        </div>
+        <div class="cphone-item-info">
+          <div class="cphone-item-title">${diary.title}</div>
+          <div class="cphone-item-preview">${dateStr}</div>
+        </div>
+        <div class="cphone-item-arrow">
+          ${arrowIcon}
+        </div>
+      `;
+      item.addEventListener('click', (e) => {
+        if (e.target.classList.contains('myphone-delete-checkbox')) return;
+        toggleMyPhoneItemSelection(actualIndex);
+        const checkbox = item.querySelector('.myphone-delete-checkbox');
+        if (checkbox) checkbox.checked = myPhoneDeleteMode.selectedIndices.has(actualIndex);
+      });
+    } else {
+      item.innerHTML = `
+        <div class="cphone-item-icon-box diary-icon-style">
+          ${diaryIconSVG}
+        </div>
+        <div class="cphone-item-info">
+          <div class="cphone-item-title">${diary.title}</div>
+          <div class="cphone-item-preview">${dateStr}</div>
+        </div>
+        <div class="cphone-item-arrow">
+          ${arrowIcon}
+        </div>
+      `;
+      item.addEventListener('click', () => openMyPhoneDiary(actualIndex));
+    }
+    
     listEl.appendChild(item);
   });
 
@@ -45207,15 +46605,17 @@ function renderMyPhoneAmap() {
 
   const char = state.chats[activeMyPhoneCharacterId];
   const locations = char.myPhoneAmapHistory || [];
+  const isDeleteMode = myPhoneDeleteMode.active && myPhoneDeleteMode.appType === 'amap';
 
   if (locations.length === 0) {
     listEl.innerHTML = '<p style="text-align:center; color: var(--text-secondary); padding: 50px 0;">我的足迹空空如也，<br>点击右上角刷新按钮生成一些记录吧！</p>';
     return;
   }
 
-  locations.forEach(item => {
+  locations.forEach((item, idx) => {
     const itemEl = document.createElement('div');
     itemEl.className = 'char-amap-item';
+    itemEl.style.position = 'relative';
 
     // 兼容新旧数据结构
     const locationName = item.locationName || item.name || '未知地点';
@@ -45229,7 +46629,14 @@ function renderMyPhoneAmap() {
       photoHtml = `<div class="amap-item-photo" style="background-image: url('${imageUrl}')" data-comment="${comment}"></div>`;
     }
 
+    // 添加复选框（如果在删除模式下）
+    let checkboxHtml = '';
+    if (isDeleteMode) {
+      checkboxHtml = `<input type="checkbox" class="myphone-delete-checkbox" data-index="${idx}" style="position: absolute; top: 8px; right: 8px; width: 24px; height: 24px; cursor: pointer; z-index: 10;" onchange="toggleMyPhoneItemSelection(${idx})">`;
+    }
+
     itemEl.innerHTML = `
+      ${checkboxHtml}
       <div class="amap-item-header">
         <div class="amap-item-icon">📍</div>
         <div class="amap-item-info">
@@ -45244,6 +46651,15 @@ function renderMyPhoneAmap() {
       <div class="amap-item-footer">${timeAgo}</div>
     `;
     
+    if (isDeleteMode) {
+      itemEl.addEventListener('click', (e) => {
+        if (e.target.classList.contains('myphone-delete-checkbox')) return;
+        toggleMyPhoneItemSelection(idx);
+        const checkbox = itemEl.querySelector('.myphone-delete-checkbox');
+        if (checkbox) checkbox.checked = myPhoneDeleteMode.selectedIndices.has(idx);
+      });
+    }
+    
     listEl.appendChild(itemEl);
   });
 }
@@ -45254,16 +46670,21 @@ function renderMyPhoneAppUsage() {
   if (!activeMyPhoneCharacterId) return;
 
   const char = state.chats[activeMyPhoneCharacterId];
-  const usageData = (char.myPhoneAppUsage || []).sort((a, b) => b.usageTimeMinutes - a.usageTimeMinutes);
+  const originalUsage = char.myPhoneAppUsage || [];
+  const usageData = originalUsage.slice().sort((a, b) => b.usageTimeMinutes - a.usageTimeMinutes);
+  const isDeleteMode = myPhoneDeleteMode.active && myPhoneDeleteMode.appType === 'usage';
 
   if (usageData.length === 0) {
     listEl.innerHTML = '<p style="text-align:center; color: var(--text-secondary); padding: 50px 0;">暂无使用记录，<br>点击右上角+号添加或刷新按钮生成！</p>';
     return;
   }
 
-  usageData.forEach(item => {
+  usageData.forEach((item, displayIdx) => {
     const itemEl = document.createElement('div');
     itemEl.className = 'char-usage-item';
+
+    // 找到在原始数组中的索引
+    const actualIndex = originalUsage.indexOf(item);
 
     // 计算时长显示
     const hours = Math.floor(item.usageTimeMinutes / 60);
@@ -45282,14 +46703,32 @@ function renderMyPhoneAppUsage() {
       iconHtml = `<div class="usage-item-icon" style="background-color: #e0e0e0; display: flex; align-items: center; justify-content: center; color: #999; font-size: 20px;">📱</div>`;
     }
 
-    itemEl.innerHTML = `
-      ${iconHtml}
-      <div class="usage-item-info">
-        <div class="usage-item-name">${item.appName}</div>
-        <div class="usage-item-category">${item.category}</div>
-      </div>
-      <div class="usage-item-time">${timeString}</div>
-    `;
+    if (isDeleteMode) {
+      itemEl.innerHTML = `
+        <input type="checkbox" class="myphone-delete-checkbox" data-index="${actualIndex}" style="width: 20px; height: 20px; margin-right: 10px; cursor: pointer;" onchange="toggleMyPhoneItemSelection(${actualIndex})">
+        ${iconHtml}
+        <div class="usage-item-info">
+          <div class="usage-item-name">${item.appName}</div>
+          <div class="usage-item-category">${item.category}</div>
+        </div>
+        <div class="usage-item-time">${timeString}</div>
+      `;
+      itemEl.addEventListener('click', (e) => {
+        if (e.target.classList.contains('myphone-delete-checkbox')) return;
+        toggleMyPhoneItemSelection(actualIndex);
+        const checkbox = itemEl.querySelector('.myphone-delete-checkbox');
+        if (checkbox) checkbox.checked = myPhoneDeleteMode.selectedIndices.has(actualIndex);
+      });
+    } else {
+      itemEl.innerHTML = `
+        ${iconHtml}
+        <div class="usage-item-info">
+          <div class="usage-item-name">${item.appName}</div>
+          <div class="usage-item-category">${item.category}</div>
+        </div>
+        <div class="usage-item-time">${timeString}</div>
+      `;
+    }
     
     listEl.appendChild(itemEl);
   });
@@ -45302,6 +46741,7 @@ function renderMyPhoneMusicScreen() {
 
   const char = state.chats[activeMyPhoneCharacterId];
   const playlist = char.myPhoneMusicPlaylist || [];
+  const isDeleteMode = myPhoneDeleteMode.active && myPhoneDeleteMode.appType === 'music';
 
   if (playlist.length === 0) {
     listEl.innerHTML = '<p style="text-align:center; color: var(--text-secondary); padding: 50px 0;">我的歌单空空如也，<br>点击右上角+号添加或刷新按钮生成！</p>';
@@ -45315,16 +46755,33 @@ function renderMyPhoneMusicScreen() {
     // 处理封面图，如果没有封面则使用默认图
     const coverUrl = track.cover || 'https://via.placeholder.com/60x60/cccccc/666666?text=Music';
     
-    itemEl.innerHTML = `
-      <img src="${coverUrl}" class="music-item-cover">
-      <div class="music-item-info">
-        <div class="music-item-name">${track.name || track.title || '未知歌曲'}</div>
-        <div class="music-item-artist">${track.artist || '未知歌手'}</div>
-      </div>
-    `;
+    if (isDeleteMode) {
+      itemEl.innerHTML = `
+        <input type="checkbox" class="myphone-delete-checkbox" data-index="${index}" style="width: 20px; height: 20px; margin-right: 10px; cursor: pointer;" onchange="toggleMyPhoneItemSelection(${index})">
+        <img src="${coverUrl}" class="music-item-cover">
+        <div class="music-item-info">
+          <div class="music-item-name">${track.name || track.title || '未知歌曲'}</div>
+          <div class="music-item-artist">${track.artist || '未知歌手'}</div>
+        </div>
+      `;
+      itemEl.addEventListener('click', (e) => {
+        if (e.target.classList.contains('myphone-delete-checkbox')) return;
+        toggleMyPhoneItemSelection(index);
+        const checkbox = itemEl.querySelector('.myphone-delete-checkbox');
+        if (checkbox) checkbox.checked = myPhoneDeleteMode.selectedIndices.has(index);
+      });
+    } else {
+      itemEl.innerHTML = `
+        <img src="${coverUrl}" class="music-item-cover">
+        <div class="music-item-info">
+          <div class="music-item-name">${track.name || track.title || '未知歌曲'}</div>
+          <div class="music-item-artist">${track.artist || '未知歌手'}</div>
+        </div>
+      `;
+      // 使用CPhone的播放器播放MYphone的歌曲
+      itemEl.addEventListener('click', () => playMyPhoneSong(index, playlist));
+    }
 
-    // 使用CPhone的播放器播放MYphone的歌曲
-    itemEl.addEventListener('click', () => playMyPhoneSong(index, playlist));
     listEl.appendChild(itemEl);
   });
 }
@@ -46059,20 +47516,44 @@ let lockScreenState = {
   }
 
   function handleKeypadInput(num) {
-      if (lockScreenState.passwordBuffer.length < 4) {
-          lockScreenState.passwordBuffer += num;
-          updateDots();
-          
-          if (lockScreenState.passwordBuffer.length === 4) {
-              setTimeout(checkLockPassword, 200);
+      const lockScreen = document.getElementById('lock-screen');
+      const isMyPhoneMode = lockScreen.classList.contains('myphone-lock-mode');
+      
+      if (isMyPhoneMode) {
+          if (myPhoneLockScreenState.passwordBuffer.length < 4) {
+              myPhoneLockScreenState.passwordBuffer += num;
+              updateMyPhoneLockDots();
+              
+              if (myPhoneLockScreenState.passwordBuffer.length === 4) {
+                  setTimeout(checkMyPhoneLockPassword, 200);
+              }
+          }
+      } else {
+          if (lockScreenState.passwordBuffer.length < 4) {
+              lockScreenState.passwordBuffer += num;
+              updateDots();
+              
+              if (lockScreenState.passwordBuffer.length === 4) {
+                  setTimeout(checkLockPassword, 200);
+              }
           }
       }
   }
 
   function deleteKeypadInput() {
-      if (lockScreenState.passwordBuffer.length > 0) {
-          lockScreenState.passwordBuffer = lockScreenState.passwordBuffer.slice(0, -1);
-          updateDots();
+      const lockScreen = document.getElementById('lock-screen');
+      const isMyPhoneMode = lockScreen.classList.contains('myphone-lock-mode');
+      
+      if (isMyPhoneMode) {
+          if (myPhoneLockScreenState.passwordBuffer.length > 0) {
+              myPhoneLockScreenState.passwordBuffer = myPhoneLockScreenState.passwordBuffer.slice(0, -1);
+              updateMyPhoneLockDots();
+          }
+      } else {
+          if (lockScreenState.passwordBuffer.length > 0) {
+              lockScreenState.passwordBuffer = lockScreenState.passwordBuffer.slice(0, -1);
+              updateDots();
+          }
       }
   }
 
@@ -46112,16 +47593,43 @@ let lockScreenState = {
       // 如果已经在输入密码模式，就不重复触发
       if (lockScreen.classList.contains('input-mode')) return;
 
-      if (state.globalSettings.lockScreenPassword) {
-          showPasswordInput();
+      const isMyPhoneMode = lockScreen.classList.contains('myphone-lock-mode');
+      
+      if (isMyPhoneMode) {
+          // MyPhone锁屏模式
+          const characterId = myPhoneLockScreenState.pendingCharacterId;
+          if (!characterId) return;
+          
+          const char = state.chats[characterId];
+          if (!char) return;
+          
+          if (char.settings.myPhoneLockScreenPassword) {
+              showMyPhonePasswordInput();
+          } else {
+              // 如果没有设置密码，直接解锁
+              lockScreen.classList.add('unlocking');
+              myPhoneLockScreenState.isLocked = false;
+              setTimeout(() => {
+                  lockScreen.classList.remove('active');
+                  lockScreen.classList.remove('unlocking');
+                  lockScreen.classList.remove('myphone-lock-mode');
+                  enterMyPhone(characterId);
+                  myPhoneLockScreenState.pendingCharacterId = null;
+              }, 500);
+          }
       } else {
-          // 如果没有设置密码，直接滑动解锁
-          lockScreen.classList.add('unlocking');
-          lockScreenState.isLocked = false;
-          setTimeout(() => {
-              lockScreen.classList.remove('active');
-              lockScreen.classList.remove('unlocking');
-          }, 500);
+          // 主屏幕锁屏模式
+          if (state.globalSettings.lockScreenPassword) {
+              showPasswordInput();
+          } else {
+              // 如果没有设置密码，直接滑动解锁
+              lockScreen.classList.add('unlocking');
+              lockScreenState.isLocked = false;
+              setTimeout(() => {
+                  lockScreen.classList.remove('active');
+                  lockScreen.classList.remove('unlocking');
+              }, 500);
+          }
       }
   }
 
@@ -51933,6 +53441,10 @@ ${recentHistoryWithUser}
         {
           text: '从角色卡导入 (.json/.png)',
           value: 'import_card'
+        },
+        {
+          text: '导入文件（仅TXT、DOCX、ZIP，ZIP也只解析TXT和DOCX）',
+          value: 'import_file'
         }
       ]);
 
@@ -51984,7 +53496,9 @@ ${recentHistoryWithUser}
             offlineMinLength: 100,
             offlineMaxLength: 300,
             offlinePresetId: null,
-            timeZone: 'Asia/Shanghai'
+            timeZone: 'Asia/Shanghai',
+            myPhoneLockScreenEnabled: false,
+            myPhoneLockScreenPassword: ''
           },
           history: [],
           musicData: {
@@ -52011,6 +53525,9 @@ ${recentHistoryWithUser}
           console.warn("角色卡导入被取消:", error.message);
         }
        
+      } else if (choice === 'import_file') {
+        // 导入文件（非酒馆）
+        await handleCharacterFileImport();
       }
     });
 
@@ -57496,6 +59013,47 @@ if (isGroup) {
       addMyPhoneMessage();
     });
     
+    // MyPhone 锁屏设置事件监听
+    document.getElementById('myphone-lock-screen-toggle')?.addEventListener('change', async (e) => {
+      if (!activeMyPhoneCharacterId) return;
+      const char = state.chats[activeMyPhoneCharacterId];
+      if (!char) return;
+      
+      const detail = document.getElementById('myphone-lock-screen-settings-detail');
+      if (detail) {
+        detail.style.display = e.target.checked ? 'block' : 'none';
+      }
+      
+      char.settings.myPhoneLockScreenEnabled = e.target.checked;
+      await db.chats.put(char);
+    });
+    
+    document.getElementById('myphone-lock-screen-password-input')?.addEventListener('change', async (e) => {
+      if (!activeMyPhoneCharacterId) return;
+      const char = state.chats[activeMyPhoneCharacterId];
+      if (!char) return;
+      
+      const password = e.target.value.trim();
+      if (password && password.length !== 4) {
+        showCustomAlert('提示', '密码必须是4位数字');
+        e.target.value = char.settings.myPhoneLockScreenPassword || '';
+        return;
+      }
+      
+      if (password && !/^\d{4}$/.test(password)) {
+        showCustomAlert('提示', '密码必须是4位数字');
+        e.target.value = char.settings.myPhoneLockScreenPassword || '';
+        return;
+      }
+      
+      char.settings.myPhoneLockScreenPassword = password;
+      await db.chats.put(char);
+      
+      if (password) {
+        showCustomAlert('成功', '锁屏密码已设置');
+      }
+    });
+    
     // MY Phone QQ 对话消息点击事件监听（图片、语音、转账）
     document.getElementById('myphone-conversation-messages')?.addEventListener('click', async (e) => {
       // 1. 处理 AI 生成的图片点击 - 显示描述
@@ -57539,6 +59097,31 @@ if (isGroup) {
         return;
       }
     });
+    
+    // MY Phone QQ 对话滚动加载事件监听
+    const myphoneConversationMessages = document.getElementById('myphone-conversation-messages');
+    if (myphoneConversationMessages) {
+      const myphoneScrollHandler = () => {
+        // 只有在查看真实对话（index === -1）时才支持滚动加载
+        if (myphoneActiveConversationIndex !== -1) {
+          return;
+        }
+        
+        // 滚动到顶部时加载更多消息
+        if (myphoneConversationMessages.scrollTop < 1 && !isLoadingMoreMyPhoneMessages) {
+          const char = state.chats[activeMyPhoneCharacterId];
+          if (!char) return;
+          
+          const totalMessages = char.history.filter(m => !m.isHidden).length;
+          
+          if (totalMessages > myphoneRenderedCount) {
+            loadMoreMyPhoneMessages();
+          }
+        }
+      };
+      
+      myphoneConversationMessages.addEventListener('scroll', myphoneScrollHandler);
+    }
     
     document.getElementById('regenerate-myphone-album-btn')?.addEventListener('click', async () => {
       showCustomAlert("正在执行...", "正在生成我的相册...");
@@ -57668,6 +59251,43 @@ if (isGroup) {
     
     // 监听添加方式切换
     document.getElementById('myphone-music-source-select')?.addEventListener('change', toggleMyPhoneMusicInputs);
+    
+    // MY Phone 删除按钮事件监听
+    document.getElementById('delete-myphone-qq-btn')?.addEventListener('click', () => {
+      toggleMyPhoneDeleteMode('qq');
+    });
+    
+    document.getElementById('delete-myphone-album-btn')?.addEventListener('click', () => {
+      toggleMyPhoneDeleteMode('album');
+    });
+    
+    document.getElementById('delete-myphone-browser-btn')?.addEventListener('click', () => {
+      toggleMyPhoneDeleteMode('browser');
+    });
+    
+    document.getElementById('delete-myphone-taobao-btn')?.addEventListener('click', () => {
+      toggleMyPhoneDeleteMode('taobao');
+    });
+    
+    document.getElementById('delete-myphone-memo-btn')?.addEventListener('click', () => {
+      toggleMyPhoneDeleteMode('memo');
+    });
+    
+    document.getElementById('delete-myphone-diary-btn')?.addEventListener('click', () => {
+      toggleMyPhoneDeleteMode('diary');
+    });
+    
+    document.getElementById('delete-myphone-usage-btn')?.addEventListener('click', () => {
+      toggleMyPhoneDeleteMode('usage');
+    });
+    
+    document.getElementById('delete-myphone-music-btn')?.addEventListener('click', () => {
+      toggleMyPhoneDeleteMode('music');
+    });
+    
+    document.getElementById('delete-myphone-amap-btn')?.addEventListener('click', () => {
+      toggleMyPhoneDeleteMode('amap');
+    });
     
     // 一起听歌曲全选功能
     document.getElementById('myphone-yiqiting-select-all')?.addEventListener('change', (e) => {
