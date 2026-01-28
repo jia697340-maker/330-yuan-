@@ -41,6 +41,42 @@ function qqUndefinedFilter(content) {
 }
 // ========== QQ主屏幕Undefined过滤器结束 ==========
 
+// ========== 货币映射配置 ==========
+const CURRENCY_MAP = {
+  'China': { symbol: '¥', name: '人民币', code: 'CNY', rate: 1.0 },
+  'USA': { symbol: '$', name: '美元', code: 'USD', rate: 7.25 },
+  'Japan': { symbol: '¥', name: '日元', code: 'JPY', rate: 0.05 },
+  'UK': { symbol: '£', name: '英镑', code: 'GBP', rate: 9.15 },
+  'Europe': { symbol: '€', name: '欧元', code: 'EUR', rate: 7.8 },
+  'Austria': { symbol: '€', name: '欧元', code: 'EUR', rate: 7.8 },
+  'Korea': { symbol: '₩', name: '韩元', code: 'KRW', rate: 0.0054 },
+  'Russia': { symbol: '₽', name: '卢布', code: 'RUB', rate: 0.075 },
+  'India': { symbol: '₹', name: '卢比', code: 'INR', rate: 0.086 },
+  'Canada': { symbol: 'C$', name: '加元', code: 'CAD', rate: 5.15 },
+  'Australia': { symbol: 'A$', name: '澳元', code: 'AUD', rate: 4.65 },
+  'Singapore': { symbol: 'S$', name: '新加坡元', code: 'SGD', rate: 5.38 },
+  'Thailand': { symbol: '฿', name: '泰铢', code: 'THB', rate: 0.21 },
+  'Vietnam': { symbol: '₫', name: '越南盾', code: 'VND', rate: 0.0003 },
+  'None': { symbol: '¥', name: '人民币', code: 'CNY', rate: 1.0 } // 无国籍默认人民币
+};
+
+// 获取角色的货币信息
+function getCurrencyForChat(chat) {
+  if (!chat || !chat.country) {
+    return CURRENCY_MAP['China']; // 默认中国
+  }
+  return CURRENCY_MAP[chat.country] || CURRENCY_MAP['China'];
+}
+
+// 外币换算成人民币
+function convertToCNY(amount, currency) {
+  if (!currency || !currency.rate) {
+    return amount; // 默认不换算
+  }
+  return amount * currency.rate;
+}
+// ========== 货币映射配置结束 ==========
+
 function escapeHTML(str) {
   if (!str) return '';
   return str.replace(/[&<>"']/g, function(match) {
@@ -9519,6 +9555,7 @@ https://xx.com/4.jpg 疑惑`;
                 isGroup: false,
                 isPinned: false,
                 unreadCount: 0,
+                country: 'China', // 默认中国，后续可以自动识别或手动修改
                 relationship: {
                   status: 'friend',
                   blockedTimestamp: null,
@@ -9783,6 +9820,7 @@ https://xx.com/4.jpg 疑惑`;
             isGroup: false,
             isPinned: false,
             unreadCount: 0,
+            country: 'China', // 默认中国，后续可以自动识别或手动修改
             relationship: {
               status: 'friend',
               blockedTimestamp: null,
@@ -10538,7 +10576,17 @@ https://xx.com/4.jpg 疑惑`;
           }
         }
         const heartIcon = `<svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" style="vertical-align: middle;"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"></path></svg>`;
-        contentHtml = `<div class="transfer-card"><div class="transfer-title">${heartIcon} ${titleText}</div><div class="transfer-amount">¥ ${Number(msg.amount).toFixed(2)}</div><div class="transfer-note">${noteText}</div></div>`;
+        
+        // 根据发送方决定货币显示
+        let currencySymbol = '¥'; // 默认人民币
+        if (!isUser) {
+          // 角色发送的转账，显示角色的货币
+          const currency = getCurrencyForChat(chat);
+          currencySymbol = currency.symbol;
+        }
+        // 用户发送的转账始终显示人民币
+        
+        contentHtml = `<div class="transfer-card"><div class="transfer-title">${heartIcon} ${titleText}</div><div class="transfer-amount">${currencySymbol} ${Number(msg.amount).toFixed(2)}</div><div class="transfer-note">${noteText}</div></div>`;
       } else if (msg.type === 'waimai_request') {
         bubble.classList.add('is-waimai-request', 'is-card-like');
         if (msg.status === 'paid' || msg.status === 'rejected') bubble.classList.add(`status-${msg.status}`);
@@ -21207,6 +21255,11 @@ ${longTermMemoryContext}
 
     document.getElementById('video-call-main').innerHTML = `<em>${videoCallState.isGroupCall ? '群聊已建立...' : '正在接通...'}</em>`;
     showScreen('video-call-screen');
+    
+    // 应用视频通话优化设置
+    if (typeof window.applyVideoOptimizationToCall === 'function') {
+      window.applyVideoOptimizationToCall(chat);
+    }
 
     document.getElementById('user-speak-btn').style.display = videoCallState.isUserParticipating ? 'block' : 'none';
     document.getElementById('join-call-btn').style.display = videoCallState.isUserParticipating ? 'none' : 'block';
@@ -21326,6 +21379,12 @@ function restoreVideoCall() {
 
     clearInterval(callTimerInterval);
     callTimerInterval = null;
+    
+    // 停止摄像头
+    if (typeof stopCamera === 'function') {
+      stopCamera();
+    }
+    
     videoCallState = {
       isActive: false,
       isAwaitingResponse: false,
@@ -21495,9 +21554,23 @@ ${linkedContents}
       addLongPressListener(userBubble, () => showCallMessageActions(userTimestamp));
       callFeed.appendChild(userBubble);
       callFeed.scrollTop = callFeed.scrollHeight;
+      
+      // 检查是否启用真实摄像头并获取截图
+      let userContent = userInput;
+      if (chat.videoOptimization && chat.videoOptimization.enableRealCamera) {
+        const capturedImage = window.getLastCameraCapture ? window.getLastCameraCapture() : null;
+        if (capturedImage) {
+          // 为支持视觉的模型构建多模态消息
+          userContent = [
+            { type: 'text', text: userInput },
+            { type: 'image_url', image_url: { url: capturedImage } }
+          ];
+        }
+      }
+      
       videoCallState.callHistory.push({
         role: 'user',
-        content: userInput,
+        content: userContent,
         timestamp: userTimestamp
       });
     }
@@ -21955,11 +22028,24 @@ async function handleUserTransferResponse(choice) {
     } else {
         // --- 接收逻辑 ---
         if (transferAmount > 0) {
-            // 调用上面修复过的记账函数
-            const success = await processTransaction(transferAmount, 'income', `收到转账-${originalMessage.senderName}`);
+            // 获取发送方的货币信息并进行汇率换算
+            const senderCurrency = getCurrencyForChat(chat);
+            const cnyAmount = convertToCNY(transferAmount, senderCurrency);
+            
+            // 调用上面修复过的记账函数（存入换算后的人民币金额）
+            const success = await processTransaction(cnyAmount, 'income', `收到转账-${originalMessage.senderName}`);
             
             if (success) {
-                await showCustomAlert("收款成功", `已存入余额：+ ¥${transferAmount.toFixed(2)}`);
+                // 显示换算信息
+                let alertMessage;
+                if (senderCurrency.code !== 'CNY') {
+                    // 外币转账，显示换算信息
+                    alertMessage = `已收款 ${senderCurrency.symbol}${transferAmount.toFixed(2)}\n汇率: 1 ${senderCurrency.code} = ${senderCurrency.rate} CNY\n\n已存入余额：¥${cnyAmount.toFixed(2)}`;
+                } else {
+                    // 人民币转账
+                    alertMessage = `已存入余额：+ ¥${cnyAmount.toFixed(2)}`;
+                }
+                await showCustomAlert("收款成功", alertMessage);
                 
                 // ★★★ 新增这部分逻辑 (生成“已收款”卡片) ★★★
                 const receivedMessage = {
@@ -23543,9 +23629,9 @@ async function handlePacketClick(timestamp) {
       item.dataset.iconId = iconId;
 
       item.innerHTML = `
-                    <img class="icon-preview" src="${iconUrl}" alt="${labelText}">
-                    <button class="change-icon-btn">更换</button>
-                `;
+        <img class="icon-preview" src="${iconUrl}" alt="${labelText}">
+        <button class="change-icon-btn">更换</button>
+      `;
       grid.appendChild(item);
     }
   }
@@ -31989,7 +32075,10 @@ async function getPlayableSongDetails(songData) {
       if (isAvailable) {
         validPlaylist.push(track);
       } else {
-        invalidSongs.push(track.name);
+        invalidSongs.push({
+          name: track.name,
+          artist: track.artist || '未知歌手'
+        });
         console.warn(`无效链接: ${track.name} - ${track.src}`);
       }
     });
@@ -32000,7 +32089,7 @@ async function getPlayableSongDetails(songData) {
 
     if (removedCount > 0) {
       const currentPlayingTrack = musicState.playlist[musicState.currentIndex];
-      const isCurrentTrackRemoved = invalidSongs.includes(currentPlayingTrack?.name);
+      const isCurrentTrackRemoved = invalidSongs.some(s => s.name === currentPlayingTrack?.name);
 
       musicState.playlist = validPlaylist;
       await saveGlobalPlaylist();
@@ -32017,11 +32106,260 @@ async function getPlayableSongDetails(songData) {
       updatePlaylistUI();
       updatePlayerUI();
 
-      await showCustomAlert("清理完成", `成功移除了 ${removedCount} 首无效歌曲:\n\n- ${invalidSongs.join('\n- ')}`);
+      // 显示被清理的歌曲列表模态框
+      showCleanedSongsModal(invalidSongs);
     } else {
       await showCustomAlert("检查完成", "所有歌曲链接均有效，无需清理！");
     }
   }
+
+  // 显示被清理歌曲的模态框
+  function showCleanedSongsModal(cleanedSongs) {
+    const modal = document.getElementById('cleaned-songs-modal');
+    const listEl = document.getElementById('cleaned-songs-list');
+    listEl.innerHTML = '';
+    document.getElementById('select-all-cleaned-songs').checked = false;
+
+    cleanedSongs.forEach(song => {
+      const item = document.createElement('div');
+      item.className = 'search-result-item';
+      item.dataset.songJson = JSON.stringify(song);
+
+      item.innerHTML = `
+        <input type="checkbox" class="cleaned-song-checkbox" style="margin-right: 15px;">
+        <div class="search-result-info">
+          <div class="title">${song.name}</div>
+          <div class="artist">${song.artist}</div>
+        </div>
+      `;
+      listEl.appendChild(item);
+    });
+
+    modal.classList.add('visible');
+  }
+
+  // 处理重新搜索选中的歌曲
+  async function handleResearchSelectedSongs() {
+    const modal = document.getElementById('cleaned-songs-modal');
+    const checkboxes = modal.querySelectorAll('.cleaned-song-checkbox:checked');
+    
+    if (checkboxes.length === 0) {
+      await showCustomAlert("提示", "请先选择要重新搜索的歌曲");
+      return;
+    }
+
+    const selectedSongs = [];
+    checkboxes.forEach(cb => {
+      const item = cb.closest('.search-result-item');
+      const songData = JSON.parse(item.dataset.songJson);
+      selectedSongs.push(songData);
+    });
+
+    // 关闭被清理歌曲模态框
+    modal.classList.remove('visible');
+
+    // 逐个处理
+    await processResearchSongsOneByOne(selectedSongs);
+  }
+
+  // 逐个处理重新搜索的歌曲
+  async function processResearchSongsOneByOne(songs) {
+    for (let i = 0; i < songs.length; i++) {
+      const song = songs[i];
+      let searchQuery = `${song.name} ${song.artist}`;
+
+      // 让用户确认或修改搜索关键词
+      const userQuery = prompt(`第 ${i + 1}/${songs.length} 首\n\n请确认或修改搜索关键词：`, searchQuery);
+      
+      if (userQuery === null) {
+        // 用户点击取消，询问是否继续下一首
+        const continueNext = await showCustomConfirm(
+          "已取消",
+          `是否继续搜索下一首歌曲？`,
+          { confirmText: '继续' }
+        );
+        if (!continueNext) break;
+        continue;
+      }
+
+      searchQuery = userQuery.trim();
+      if (!searchQuery) {
+        await showCustomAlert("提示", "搜索关键词不能为空");
+        i--; // 重新处理当前歌曲
+        continue;
+      }
+
+      // 搜索循环，允许重新输入关键词
+      let searchSuccess = false;
+      while (!searchSuccess) {
+        await showCustomAlert("搜索中...", `正在搜索：${searchQuery}`);
+
+        try {
+          // 使用默认的 exhigh 音质搜索
+          const searchResults = await searchToubiec(searchQuery);
+
+          if (searchResults.length === 0) {
+            // 未找到结果，询问是否重新输入关键词
+            const choice = await showChoiceModal("未找到结果", [
+              { text: `"${searchQuery}" 没有搜索到结果`, value: 'info' },
+              { text: '重新输入关键词', value: 'retry' },
+              { text: '跳过此歌曲', value: 'skip' },
+              { text: '结束搜索', value: 'quit' }
+            ]);
+
+            if (choice === 'retry') {
+              const newQuery = prompt(`请重新输入搜索关键词：`, searchQuery);
+              if (newQuery && newQuery.trim()) {
+                searchQuery = newQuery.trim();
+                continue; // 继续搜索循环
+              } else {
+                searchSuccess = true; // 退出搜索循环，继续下一首
+                break;
+              }
+            } else if (choice === 'skip') {
+              searchSuccess = true; // 跳过，继续下一首
+              break;
+            } else if (choice === 'quit') {
+              return; // 结束整个搜索流程
+            }
+            continue;
+          }
+
+          // 显示搜索结果让用户选择
+          const selectedTrack = await showSongSelectionModal(searchResults, song.name, i + 1, songs.length);
+
+          if (selectedTrack) {
+            // 获取歌曲详情并添加到播放列表
+            const trackDetails = await getPlayableSongDetails(selectedTrack);
+            
+            if (trackDetails) {
+              musicState.playlist.push(trackDetails);
+              await saveGlobalPlaylist();
+              updatePlaylistUI();
+              await showCustomAlert("添加成功", `"${song.name}" 已添加到播放列表`);
+              searchSuccess = true; // 成功，继续下一首
+            } else {
+              await showCustomAlert("添加失败", `无法获取 "${song.name}" 的播放链接`);
+              searchSuccess = true; // 失败也继续下一首
+            }
+          } else {
+            // 用户取消或跳过
+            searchSuccess = true; // 继续下一首
+          }
+
+        } catch (e) {
+          console.error(`搜索 "${searchQuery}" 失败:`, e);
+          const retry = await showCustomConfirm(
+            "搜索出错",
+            `搜索 "${searchQuery}" 时出错，是否重新尝试？`,
+            { confirmText: '重新尝试' }
+          );
+          if (!retry) {
+            searchSuccess = true; // 不重试，继续下一首
+          }
+        }
+      }
+    }
+
+    await showCustomAlert("完成", "所有选中的歌曲已处理完毕");
+  }
+
+  // 显示歌曲选择模态框
+  function showSongSelectionModal(searchResults, songName, currentIndex, totalCount) {
+    return new Promise((resolve) => {
+      const modal = document.getElementById('music-search-results-modal');
+      const listEl = document.getElementById('search-results-list');
+      const headerSpan = modal.querySelector('.modal-header span');
+      
+      // 修改标题显示当前进度
+      headerSpan.textContent = `选择歌曲 (${currentIndex}/${totalCount}): ${songName}`;
+      
+      listEl.innerHTML = '';
+      document.getElementById('select-all-music-search').checked = false;
+
+      // 渲染搜索结果（单选模式）
+      searchResults.forEach(song => {
+        song.preferredQuality = 'exhigh'; // 默认极高音质
+
+        const item = document.createElement('div');
+        item.className = 'search-result-item';
+        item.dataset.songJson = JSON.stringify(song);
+        item.style.cursor = 'pointer';
+
+        let sourceTag = '';
+        if (song.source === 'toubiec') {
+          sourceTag = '<span class="source" style="color:#ff3b30; border-color:#ff3b30;">极高</span>';
+        } else if (song.source === 'netease') {
+          sourceTag = '<span class="source" style="color:#c20c0c; border-color:#c20c0c;">网易云</span>';
+        } else {
+          sourceTag = '<span class="source" style="color:#00e09e; border-color:#00e09e;">QQ音乐</span>';
+        }
+
+        item.innerHTML = `
+          <input type="radio" name="song-selection-radio" class="music-search-radio" style="margin-right: 15px;">
+          <div class="search-result-info">
+            <div class="title">${song.name}</div>
+            <div class="artist">${song.artist} ${sourceTag}</div>
+          </div>
+        `;
+
+        // 点击整行也能选中
+        item.addEventListener('click', (e) => {
+          if (e.target.type !== 'radio') {
+            const radio = item.querySelector('.music-search-radio');
+            radio.checked = true;
+          }
+        });
+
+        listEl.appendChild(item);
+      });
+
+      modal.classList.add('visible');
+
+      // 临时修改按钮文本和功能
+      const cancelBtn = document.getElementById('cancel-music-search-btn');
+      const confirmBtn = document.getElementById('add-selected-music-btn');
+      
+      const originalCancelText = cancelBtn.textContent;
+      const originalConfirmText = confirmBtn.textContent;
+      
+      cancelBtn.textContent = '跳过';
+      confirmBtn.textContent = '确认添加';
+
+      // 取消/跳过按钮
+      const handleCancel = () => {
+        cleanup();
+        resolve(null);
+      };
+
+      // 确认按钮
+      const handleConfirm = () => {
+        const selectedRadio = modal.querySelector('.music-search-radio:checked');
+        if (!selectedRadio) {
+          alert('请先选择一首歌曲');
+          return;
+        }
+
+        const item = selectedRadio.closest('.search-result-item');
+        const songData = JSON.parse(item.dataset.songJson);
+        cleanup();
+        resolve(songData);
+      };
+
+      const cleanup = () => {
+        modal.classList.remove('visible');
+        headerSpan.textContent = '搜索结果'; // 恢复标题
+        cancelBtn.textContent = originalCancelText;
+        confirmBtn.textContent = originalConfirmText;
+        cancelBtn.removeEventListener('click', handleCancel);
+        confirmBtn.removeEventListener('click', handleConfirm);
+      };
+
+      cancelBtn.addEventListener('click', handleCancel);
+      confirmBtn.addEventListener('click', handleConfirm);
+    });
+  }
+
 function toggleReadingFullscreen() {
     const readingWindow = document.getElementById('reading-window');
     const readingOverlay = document.getElementById('reading-overlay');
@@ -44478,9 +44816,24 @@ window.removeGreenRiverFromShelf = removeGreenRiverFromShelf;
 async function playVideoCallPureTTS(text, voiceId) {
     // 1. 正则去除括号及括号内的内容 (支持中英文括号 [])
     // 匹配：(xxx) 或 （xxx） 或 [xxx] 或 【xxx】
-    const cleanText = text.replace(/(\[.*?\]|\(.*?\)|（.*?）|【.*?】)/g, '').trim();
+    let cleanText = text.replace(/(\[.*?\]|\(.*?\)|（.*?）|【.*?】)/g, '').trim();
 
     // 如果去除括号后没字了，就不读
+    if (!cleanText) return;
+    
+    // 1.5. 处理"仅读取对话"功能
+    if (state.activeChatId && state.chats[state.activeChatId]) {
+        const chat = state.chats[state.activeChatId];
+        if (chat.videoOptimization && chat.videoOptimization.ttsDialogueOnly) {
+            const dialogueText = extractDialogueOnly(cleanText);
+            if (dialogueText) {
+                cleanText = dialogueText;
+                console.log('[视频通话TTS] 仅读取对话模式：', cleanText);
+            }
+        }
+    }
+    
+    // 再次检查处理后是否还有内容
     if (!cleanText) return;
 
     // 2. 检查配置
@@ -44546,7 +44899,7 @@ async function playVideoCallPureTTS(text, voiceId) {
     }
 }
 async function playTtsAudio(bodyElement) {
-    const text = decodeURIComponent(bodyElement.dataset.text);
+    let text = decodeURIComponent(bodyElement.dataset.text);
 
     // 1. 获取 Voice ID
     let voiceId = bodyElement.dataset.voiceId;
@@ -44560,6 +44913,15 @@ async function playTtsAudio(bodyElement) {
             if (!voiceId) voiceId = chat.settings.minimaxVoiceId;
             // 【关键修复】获取用户在设置中选择的语言/方言
             if (chat.settings.ttsLanguage) ttsLanguage = chat.settings.ttsLanguage;
+        }
+        
+        // 处理"仅读取对话"功能
+        if (chat.videoOptimization && chat.videoOptimization.ttsDialogueOnly) {
+            const dialogueText = extractDialogueOnly(text);
+            if (dialogueText) {
+                text = dialogueText;
+                console.log('TTS仅读取对话模式：', text);
+            }
         }
     }
 
@@ -56371,6 +56733,16 @@ if (isGroup) {
       document.getElementById('group-cooldown-group').style.display = isGroup ? 'block' : 'none';
       document.getElementById('memory-archive-section').style.display = isGroup ? 'none' : 'block';
       document.getElementById('chat-name-input').value = chat.name;
+      
+      // 加载角色国籍
+      const countrySelect = document.getElementById('character-country-select');
+      if (!isGroup) {
+        document.getElementById('character-country-group').style.display = 'block';
+        countrySelect.value = chat.country || 'China';
+      } else {
+        document.getElementById('character-country-group').style.display = 'none';
+      }
+      
       document.getElementById('my-persona').value = chat.settings.myPersona;
       document.getElementById('my-avatar-preview').src = chat.settings.myAvatar || (isGroup ? defaultMyGroupAvatar : defaultAvatar);
       document.getElementById('max-memory').value = chat.settings.maxMemory;
@@ -56690,6 +57062,11 @@ if (isGroup) {
       // 渲染记忆库列表
       renderMemoryArchiveList();
       
+      // 加载视频通话优化设置
+      if (typeof window.loadVideoOptimizationSettings === 'function') {
+        window.loadVideoOptimizationSettings(chat);
+      }
+      
       showScreen('chat-settings-screen');
     });
 
@@ -56834,6 +57211,11 @@ if (isGroup) {
         if (!chat.nameHistory.includes(chat.name)) chat.nameHistory.push(chat.name);
       }
       chat.name = newName;
+      
+      // 保存角色国籍
+      const selectedCountry = document.getElementById('character-country-select').value;
+      chat.country = selectedCountry;
+      
       const selectedThemeRadio = document.querySelector('input[name="theme-select"]:checked');
       chat.settings.theme = selectedThemeRadio ? selectedThemeRadio.value : 'default';
       chat.settings.fontSize = parseInt(document.getElementById('font-size-slider').value);
@@ -56965,6 +57347,11 @@ if (isGroup) {
         chat.groupId = selectedGroupId ? parseInt(selectedGroupId) : null;
       }
 
+      // 保存视频通话优化设置
+      if (typeof window.saveVideoOptimizationSettings === 'function') {
+        window.saveVideoOptimizationSettings(chat);
+      }
+      
       await db.chats.put(chat);
       if (!chat.isGroup) {
         await syncCharacterNameInGroups(chat);
@@ -60944,6 +61331,16 @@ if (isGroup) {
     document.getElementById('toggle-fullscreen-btn').addEventListener('click', togglePlayerFullscreen);
     document.getElementById('show-avatars-btn').addEventListener('click', toggleMusicPlayerAvatars);
 
+    // 被清理歌曲模态框事件
+    document.getElementById('select-all-cleaned-songs').addEventListener('change', (e) => {
+      const checkboxes = document.querySelectorAll('.cleaned-song-checkbox');
+      checkboxes.forEach(cb => cb.checked = e.target.checked);
+    });
+    document.getElementById('close-cleaned-songs-btn').addEventListener('click', () => {
+      document.getElementById('cleaned-songs-modal').classList.remove('visible');
+    });
+    document.getElementById('research-selected-songs-btn').addEventListener('click', handleResearchSelectedSongs);
+
 
     document.getElementById('status-bar-toggle-switch').addEventListener('change', () => {
 
@@ -63301,4 +63698,455 @@ if (deleteQuickRepliesBtn) {
       appendMessage(visibleMessage, chat);
     }
     await renderChatList();
+  }
+
+  // ========================================
+  // 视频通话优化功能
+  // ========================================
+
+  // 摄像头相关变量
+  let cameraStream = null;
+  let captureInterval = null;
+  let lastCapturedImage = null;
+
+  // 提取对话内容（只保留引号内的文本）
+  function extractDialogueOnly(text) {
+    if (!text) return '';
+    
+    // 支持的引号类型：中文引号、英文引号
+    const quotePatterns = [
+      /"([^"]*)"/g,        // 英文双引号
+      /'([^']*)'/g,        // 英文单引号
+      /「([^」]*)」/g,     // 中文直角引号
+      /『([^』]*)』/g,     // 中文直角双引号
+      /"([^"]*)"/g,        // 中文双引号
+      /'([^']*)'/g         // 中文单引号
+    ];
+    
+    let dialogues = [];
+    
+    // 提取所有引号内的内容
+    quotePatterns.forEach(pattern => {
+      let match;
+      while ((match = pattern.exec(text)) !== null) {
+        if (match[1] && match[1].trim()) {
+          dialogues.push(match[1].trim());
+        }
+      }
+    });
+    
+    // 如果没有找到任何对话，返回空字符串
+    if (dialogues.length === 0) {
+      return '';
+    }
+    
+    // 用空格连接多个对话片段
+    return dialogues.join(' ');
+  }
+
+  // 获取处理后的TTS文本
+  window.getProcessedTTSText = function(originalText, chatId) {
+    if (!originalText) return '';
+    
+    // 检查是否启用了"仅读取对话"功能
+    if (typeof state !== 'undefined' && state.chats && state.chats[chatId]) {
+      const chat = state.chats[chatId];
+      if (chat.videoOptimization && chat.videoOptimization.ttsDialogueOnly) {
+        const dialogueText = extractDialogueOnly(originalText);
+        // 如果提取到了对话内容就返回，否则返回原文（避免完全静音）
+        return dialogueText || originalText;
+      }
+    }
+    
+    return originalText;
+  };
+
+  // 初始化视频通话优化事件监听
+  function initVideoOptimization() {
+    // 视频通话优化开关
+    const enableSwitch = document.getElementById('enable-video-optimization-switch');
+    const configContainer = document.getElementById('video-optimization-config-container');
+    
+    if (enableSwitch) {
+      enableSwitch.addEventListener('change', function() {
+        if (this.checked) {
+          configContainer.style.display = 'block';
+        } else {
+          configContainer.style.display = 'none';
+        }
+      });
+    }
+
+    // 对方视频图片 - 本地上传
+    const remoteVideoInput = document.getElementById('remote-video-input');
+    if (remoteVideoInput) {
+      remoteVideoInput.addEventListener('change', function(e) {
+        const file = e.target.files[0];
+        if (file) {
+          const reader = new FileReader();
+          reader.onload = function(event) {
+            const imgUrl = event.target.result;
+            document.getElementById('remote-video-preview').src = imgUrl;
+            document.getElementById('remote-video-preview').style.display = 'block';
+            document.getElementById('remote-video-placeholder').style.display = 'none';
+          };
+          reader.readAsDataURL(file);
+        }
+      });
+    }
+
+    // 对方视频图片 - URL上传
+    const remoteVideoUrlBtn = document.getElementById('remote-video-url-btn');
+    const remoteVideoUrlInput = document.getElementById('remote-video-url-input');
+    if (remoteVideoUrlBtn && remoteVideoUrlInput) {
+      remoteVideoUrlBtn.addEventListener('click', function() {
+        const url = remoteVideoUrlInput.value.trim();
+        if (url) {
+          document.getElementById('remote-video-preview').src = url;
+          document.getElementById('remote-video-preview').style.display = 'block';
+          document.getElementById('remote-video-placeholder').style.display = 'none';
+        }
+      });
+      
+      remoteVideoUrlInput.addEventListener('keypress', function(e) {
+        if (e.key === 'Enter') {
+          remoteVideoUrlBtn.click();
+        }
+      });
+    }
+
+    // 我方视频图片 - 本地上传
+    const localVideoInput = document.getElementById('local-video-input');
+    if (localVideoInput) {
+      localVideoInput.addEventListener('change', function(e) {
+        const file = e.target.files[0];
+        if (file) {
+          const reader = new FileReader();
+          reader.onload = function(event) {
+            const imgUrl = event.target.result;
+            document.getElementById('local-video-preview').src = imgUrl;
+            document.getElementById('local-video-preview').style.display = 'block';
+            document.getElementById('local-video-placeholder').style.display = 'none';
+          };
+          reader.readAsDataURL(file);
+        }
+      });
+    }
+
+    // 我方视频图片 - URL上传
+    const localVideoUrlBtn = document.getElementById('local-video-url-btn');
+    const localVideoUrlInput = document.getElementById('local-video-url-input');
+    if (localVideoUrlBtn && localVideoUrlInput) {
+      localVideoUrlBtn.addEventListener('click', function() {
+        const url = localVideoUrlInput.value.trim();
+        if (url) {
+          document.getElementById('local-video-preview').src = url;
+          document.getElementById('local-video-preview').style.display = 'block';
+          document.getElementById('local-video-placeholder').style.display = 'none';
+        }
+      });
+      
+      localVideoUrlInput.addEventListener('keypress', function(e) {
+        if (e.key === 'Enter') {
+          localVideoUrlBtn.click();
+        }
+      });
+    }
+
+    // 对方视频图片 - 重置按钮
+    const remoteVideoResetBtn = document.getElementById('remote-video-reset-btn');
+    if (remoteVideoResetBtn) {
+      remoteVideoResetBtn.addEventListener('click', function() {
+        document.getElementById('remote-video-preview').src = '';
+        document.getElementById('remote-video-preview').style.display = 'none';
+        document.getElementById('remote-video-placeholder').style.display = 'flex';
+        document.getElementById('remote-video-url-input').value = '';
+        const remoteVideoInput = document.getElementById('remote-video-input');
+        if (remoteVideoInput) remoteVideoInput.value = '';
+      });
+    }
+
+    // 我方视频图片 - 重置按钮
+    const localVideoResetBtn = document.getElementById('local-video-reset-btn');
+    if (localVideoResetBtn) {
+      localVideoResetBtn.addEventListener('click', function() {
+        document.getElementById('local-video-preview').src = '';
+        document.getElementById('local-video-preview').style.display = 'none';
+        document.getElementById('local-video-placeholder').style.display = 'flex';
+        document.getElementById('local-video-url-input').value = '';
+        const localVideoInput = document.getElementById('local-video-input');
+        if (localVideoInput) localVideoInput.value = '';
+      });
+    }
+
+    // 真实摄像头开关
+    const enableRealCameraSwitch = document.getElementById('enable-real-camera-switch');
+    const cameraIntervalSetting = document.getElementById('camera-interval-setting');
+    if (enableRealCameraSwitch) {
+      enableRealCameraSwitch.addEventListener('change', function() {
+        if (this.checked) {
+          cameraIntervalSetting.style.display = 'block';
+        } else {
+          cameraIntervalSetting.style.display = 'none';
+          stopCamera();
+        }
+      });
+    }
+
+    // 点击小屏互换位置
+    const localVideoSmall = document.getElementById('local-video-small');
+    if (localVideoSmall) {
+      localVideoSmall.addEventListener('click', swapVideoPosition);
+    }
+  }
+
+  // 互换视频位置
+  function swapVideoPosition() {
+    const remoteImg = document.getElementById('remote-video-img');
+    const localImg = document.getElementById('local-video-img');
+    
+    const tempSrc = remoteImg.src;
+    remoteImg.src = localImg.src;
+    localImg.src = tempSrc;
+  }
+
+  // 加载视频通话优化设置
+  window.loadVideoOptimizationSettings = function(chat) {
+    if (!chat) return;
+
+    const settings = chat.videoOptimization || {};
+    
+    const enableSwitch = document.getElementById('enable-video-optimization-switch');
+    const configContainer = document.getElementById('video-optimization-config-container');
+    if (enableSwitch) {
+      enableSwitch.checked = settings.enabled || false;
+      configContainer.style.display = settings.enabled ? 'block' : 'none';
+    }
+
+    if (settings.remoteVideoUrl) {
+      document.getElementById('remote-video-preview').src = settings.remoteVideoUrl;
+      document.getElementById('remote-video-preview').style.display = 'block';
+      document.getElementById('remote-video-placeholder').style.display = 'none';
+      document.getElementById('remote-video-url-input').value = settings.remoteVideoUrl;
+    } else {
+      document.getElementById('remote-video-preview').style.display = 'none';
+      document.getElementById('remote-video-placeholder').style.display = 'flex';
+      document.getElementById('remote-video-url-input').value = '';
+    }
+
+    if (settings.localVideoUrl) {
+      document.getElementById('local-video-preview').src = settings.localVideoUrl;
+      document.getElementById('local-video-preview').style.display = 'block';
+      document.getElementById('local-video-placeholder').style.display = 'none';
+      document.getElementById('local-video-url-input').value = settings.localVideoUrl;
+    } else {
+      document.getElementById('local-video-preview').style.display = 'none';
+      document.getElementById('local-video-placeholder').style.display = 'flex';
+      document.getElementById('local-video-url-input').value = '';
+    }
+    
+    // 加载真实摄像头设置
+    const enableRealCameraSwitch = document.getElementById('enable-real-camera-switch');
+    const cameraIntervalSetting = document.getElementById('camera-interval-setting');
+    const cameraIntervalInput = document.getElementById('camera-capture-interval');
+    
+    if (enableRealCameraSwitch) {
+      enableRealCameraSwitch.checked = settings.enableRealCamera || false;
+      cameraIntervalSetting.style.display = settings.enableRealCamera ? 'block' : 'none';
+    }
+    
+    if (cameraIntervalInput) {
+      cameraIntervalInput.value = settings.cameraInterval || 5;
+    }
+    
+    // 加载仅读取对话设置
+    const ttsDialogueOnlySwitch = document.getElementById('tts-dialogue-only-switch');
+    if (ttsDialogueOnlySwitch) {
+      ttsDialogueOnlySwitch.checked = settings.ttsDialogueOnly || false;
+    }
+  };
+
+  // 保存视频通话优化设置
+  window.saveVideoOptimizationSettings = function(chat) {
+    if (!chat) return;
+
+    const enableSwitch = document.getElementById('enable-video-optimization-switch');
+    const remoteVideoPreview = document.getElementById('remote-video-preview');
+    const localVideoPreview = document.getElementById('local-video-preview');
+    const enableRealCameraSwitch = document.getElementById('enable-real-camera-switch');
+    const cameraIntervalInput = document.getElementById('camera-capture-interval');
+    const ttsDialogueOnlySwitch = document.getElementById('tts-dialogue-only-switch');
+
+    chat.videoOptimization = {
+      enabled: enableSwitch ? enableSwitch.checked : false,
+      remoteVideoUrl: remoteVideoPreview.style.display === 'block' ? remoteVideoPreview.src : '',
+      localVideoUrl: localVideoPreview.style.display === 'block' ? localVideoPreview.src : '',
+      enableRealCamera: enableRealCameraSwitch ? enableRealCameraSwitch.checked : false,
+      cameraInterval: cameraIntervalInput ? parseInt(cameraIntervalInput.value) || 5 : 5,
+      ttsDialogueOnly: ttsDialogueOnlySwitch ? ttsDialogueOnlySwitch.checked : false
+    };
+    
+    // 不需要在这里put到数据库，因为调用方会统一保存
+  };
+
+  // 应用视频通话优化到视频界面
+  window.applyVideoOptimizationToCall = async function(chat) {
+    const videoDisplayArea = document.getElementById('video-display-area');
+    const avatarArea = document.querySelector('.video-call-avatar-area');
+    
+    if (!chat || !chat.videoOptimization || !chat.videoOptimization.enabled) {
+      videoDisplayArea.style.display = 'none';
+      if (avatarArea) avatarArea.style.display = 'flex';
+      stopCamera();
+      return;
+    }
+
+    const settings = chat.videoOptimization;
+    if (settings.remoteVideoUrl || settings.localVideoUrl || settings.enableRealCamera) {
+      videoDisplayArea.style.display = 'block';
+      if (avatarArea) avatarArea.style.display = 'none';
+      
+      if (settings.remoteVideoUrl) {
+        document.getElementById('remote-video-img').src = settings.remoteVideoUrl;
+      }
+      
+      // 处理我方画面：真实摄像头或静态图片
+      const localImg = document.getElementById('local-video-img');
+      const localVideo = document.getElementById('local-camera-video');
+      
+      if (settings.enableRealCamera) {
+        // 使用真实摄像头
+        localImg.style.display = 'none';
+        localVideo.style.display = 'block';
+        
+        const success = await startCamera();
+        if (success) {
+          // 启动定时截图
+          const interval = settings.cameraInterval || 5;
+          startCameraCapture(interval);
+        }
+      } else if (settings.localVideoUrl) {
+        // 使用静态图片
+        localVideo.style.display = 'none';
+        localImg.style.display = 'block';
+        localImg.src = settings.localVideoUrl;
+        stopCamera();
+      }
+    } else {
+      videoDisplayArea.style.display = 'none';
+      if (avatarArea) avatarArea.style.display = 'flex';
+      stopCamera();
+    }
+  };
+
+  // 启动摄像头
+  async function startCamera() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        video: { 
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+          facingMode: 'user'
+        },
+        audio: false 
+      });
+      
+      cameraStream = stream;
+      const videoElement = document.getElementById('local-camera-video');
+      if (videoElement) {
+        videoElement.srcObject = stream;
+      }
+      
+      // 更新状态显示
+      updateCameraStatus(true, '摄像头已启动');
+      
+      return true;
+    } catch (error) {
+      console.error('无法访问摄像头:', error);
+      updateCameraStatus(false, '摄像头启动失败: ' + error.message);
+      return false;
+    }
+  }
+
+  // 停止摄像头
+  function stopCamera() {
+    if (cameraStream) {
+      cameraStream.getTracks().forEach(track => track.stop());
+      cameraStream = null;
+    }
+    
+    if (captureInterval) {
+      clearInterval(captureInterval);
+      captureInterval = null;
+    }
+    
+    const videoElement = document.getElementById('local-camera-video');
+    if (videoElement) {
+      videoElement.srcObject = null;
+    }
+    
+    updateCameraStatus(false, '摄像头已停止');
+  }
+
+  // 更新摄像头状态显示
+  function updateCameraStatus(isActive, message) {
+    const statusDiv = document.getElementById('camera-status');
+    const statusIcon = document.getElementById('camera-status-icon');
+    const statusText = document.getElementById('camera-status-text');
+    
+    if (statusDiv && statusIcon && statusText) {
+      statusDiv.style.display = 'block';
+      statusIcon.style.background = isActive ? '#4cd964' : '#ccc';
+      statusText.textContent = message;
+    }
+  }
+
+  // 截取摄像头画面
+  function captureCameraFrame() {
+    const videoElement = document.getElementById('local-camera-video');
+    if (!videoElement || !cameraStream) return null;
+    
+    const canvas = document.createElement('canvas');
+    canvas.width = videoElement.videoWidth;
+    canvas.height = videoElement.videoHeight;
+    
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(videoElement, 0, 0);
+    
+    // 转换为base64
+    const imageData = canvas.toDataURL('image/jpeg', 0.8);
+    lastCapturedImage = imageData;
+    
+    return imageData;
+  }
+
+  // 启动定时截图
+  function startCameraCapture(intervalSeconds) {
+    if (captureInterval) {
+      clearInterval(captureInterval);
+    }
+    
+    // 立即截取一次
+    captureCameraFrame();
+    
+    // 定时截取
+    captureInterval = setInterval(() => {
+      captureCameraFrame();
+      console.log('已截取摄像头画面');
+    }, intervalSeconds * 1000);
+  }
+
+  // 获取最新截图
+  window.getLastCameraCapture = function() {
+    return lastCapturedImage;
+  };
+
+  // 在页面加载完成后初始化
+  document.addEventListener('DOMContentLoaded', function() {
+    initVideoOptimization();
+  });
+
+  // 如果DOMContentLoaded已经触发，立即初始化
+  if (document.readyState === 'complete' || document.readyState === 'interactive') {
+    setTimeout(initVideoOptimization, 1);
   }

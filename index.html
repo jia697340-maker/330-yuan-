@@ -225,14 +225,14 @@
                       </div>
                   </div> </div> </div> </div>
           <div class="home-screen-page">
-            <div id="page-3-content" style="padding: 20px;">
-              <div class="desktop-app-icon" onclick="openMyphoneScreen()" style="display: inline-block;">
+            <div id="page-3-content" style="padding: 20px; display: grid; grid-template-columns: 1fr 1fr; gap: 25px; align-content: start;">
+              <div class="desktop-app-icon" onclick="openMyphoneScreen()">
                 <div class="icon-bg-desktop">
                   <img id="icon-img-myphone" src="https://i.postimg.cc/MTC3Tkw8/IMG-6436.jpg" alt="Myphone">
                 </div>
                 <span class="label">Myphone</span>
               </div>
-              <div class="desktop-app-icon" onclick="openCharacterGeneratorScreen()" style="display: inline-block;">
+              <div class="desktop-app-icon" onclick="openCharacterGeneratorScreen()">
                 <div class="icon-bg-desktop">
                   <img id="icon-img-char-generator" src="https://i.postimg.cc/nzGYM8qb/character-gen.jpg" alt="角色生成">
                 </div>
@@ -2805,6 +2805,20 @@
     </button>
     <span id="call-timer">00:00</span> 
 </div>
+
+      <!-- 视频画面显示区 (优化模式) -->
+      <div id="video-display-area" style="display: none;">
+        <!-- 大屏：对方画面 -->
+        <div id="remote-video-large" class="video-large-screen">
+          <img id="remote-video-img" src="" alt="对方视频">
+        </div>
+        <!-- 小屏：我方画面 -->
+        <div id="local-video-small" class="video-small-screen">
+          <img id="local-video-img" src="" alt="我的视频" style="display: block;">
+          <video id="local-camera-video" autoplay playsinline muted style="display: none; width: 100%; height: 100%; object-fit: cover;"></video>
+        </div>
+      </div>
+
       <div class="video-call-avatar-area">
         <div id="participant-avatars-grid"> </div>
       </div>
@@ -2947,6 +2961,29 @@
                 <label>我的昵称</label>
                 <div class="settings-right">
                     <input type="text" id="my-nickname-input" placeholder="我">
+                </div>
+            </div>
+
+            <div class="settings-item" id="character-country-group">
+                <label>角色国籍 (影响转账货币)</label>
+                <div class="settings-right">
+                    <select id="character-country-select" class="settings-select">
+                        <option value="China">中国 (¥ 人民币)</option>
+                        <option value="USA">美国 ($ 美元)</option>
+                        <option value="Japan">日本 (¥ 日元)</option>
+                        <option value="UK">英国 (£ 英镑)</option>
+                        <option value="Europe">欧洲 (€ 欧元)</option>
+                        <option value="Austria">奥地利 (€ 欧元)</option>
+                        <option value="Korea">韩国 (₩ 韩元)</option>
+                        <option value="Russia">俄罗斯 (₽ 卢布)</option>
+                        <option value="India">印度 (₹ 卢比)</option>
+                        <option value="Canada">加拿大 (C$ 加元)</option>
+                        <option value="Australia">澳大利亚 (A$ 澳元)</option>
+                        <option value="Singapore">新加坡 (S$ 新加坡元)</option>
+                        <option value="Thailand">泰国 (฿ 泰铢)</option>
+                        <option value="Vietnam">越南 (₫ 越南盾)</option>
+                        <option value="None">无国籍 (¥ 人民币)</option>
+                    </select>
                 </div>
             </div>
 
@@ -3271,6 +3308,109 @@
 
     </div>
 </div>
+
+        <!-- 视频通话优化设置 -->
+        <div class="settings-section" id="video-call-optimization-section">
+            <!-- 开关行 -->
+            <div class="settings-item">
+                <label>视频通话优化</label>
+                <label class="toggle-switch">
+                    <input type="checkbox" id="enable-video-optimization-switch">
+                    <span class="slider"></span>
+                </label>
+            </div>
+            
+            <!-- 详情配置区域 (由JS控制显示/隐藏) -->
+            <div id="video-optimization-config-container" style="display: none;">
+                
+                <!-- 对方视频图片 -->
+                <div class="settings-item-block">
+                    <label style="font-weight: 500;">对方视频画面</label>
+                    <div style="display: flex; align-items: center; gap: 10px; margin-top: 8px;">
+                        <img id="remote-video-preview" src="" 
+                             style="width: 80px; height: 80px; border-radius: 8px; object-fit: cover; border: 2px solid #ddd; display: none;">
+                        <div id="remote-video-placeholder" style="width: 80px; height: 80px; border-radius: 8px; background: #f0f0f0; display: flex; align-items: center; justify-content: center; font-size: 12px; color: #999;">未设置</div>
+                    </div>
+                    <div style="display: flex; gap: 8px; margin-top: 10px;">
+                        <button class="settings-mini-btn" onclick="document.getElementById('remote-video-input').click()">本地上传</button>
+                        <button class="settings-mini-btn" id="remote-video-url-btn">URL上传</button>
+                        <button class="settings-mini-btn" id="remote-video-reset-btn" style="background: #ff3b30; color: white;">重置</button>
+                        <input type="file" id="remote-video-input" accept="image/*" hidden>
+                    </div>
+                    <input type="text" id="remote-video-url-input" placeholder="或输入图片URL" 
+                           style="width: 100%; padding: 8px; margin-top: 8px; border: 1px solid #ddd; border-radius: 6px; font-size: 13px;">
+                </div>
+
+                <!-- 我方视频图片 -->
+                <div class="settings-item-block" style="border-bottom: none;">
+                    <label style="font-weight: 500;">我方视频画面</label>
+                    <div style="display: flex; align-items: center; gap: 10px; margin-top: 8px;">
+                        <img id="local-video-preview" src="" 
+                             style="width: 80px; height: 80px; border-radius: 8px; object-fit: cover; border: 2px solid #ddd; display: none;">
+                        <div id="local-video-placeholder" style="width: 80px; height: 80px; border-radius: 8px; background: #f0f0f0; display: flex; align-items: center; justify-content: center; font-size: 12px; color: #999;">未设置</div>
+                    </div>
+                    <div style="display: flex; gap: 8px; margin-top: 10px;">
+                        <button class="settings-mini-btn" onclick="document.getElementById('local-video-input').click()">本地上传</button>
+                        <button class="settings-mini-btn" id="local-video-url-btn">URL上传</button>
+                        <button class="settings-mini-btn" id="local-video-reset-btn" style="background: #ff3b30; color: white;">重置</button>
+                        <input type="file" id="local-video-input" accept="image/*" hidden>
+                    </div>
+                    <input type="text" id="local-video-url-input" placeholder="或输入图片URL" 
+                           style="width: 100%; padding: 8px; margin-top: 8px; border: 1px solid #ddd; border-radius: 6px; font-size: 13px;">
+                </div>
+
+                <!-- 真实摄像头设置 -->
+                <div class="settings-item-block" style="border-bottom: none; padding-top: 15px; border-top: 1px solid #e0e0e0; margin-top: 15px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                        <label style="font-weight: 500;">使用真实摄像头</label>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="enable-real-camera-switch">
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                    <div style="font-size: 12px; color: #666; margin-bottom: 10px;">
+                        启用后，我方画面将使用设备摄像头，AI可以真正"看到"你
+                    </div>
+                    
+                    <!-- 截图间隔设置 -->
+                    <div id="camera-interval-setting" style="display: none;">
+                        <div style="display: flex; align-items: center; gap: 10px; margin-top: 10px;">
+                            <label style="font-size: 13px; white-space: nowrap;">截图间隔</label>
+                            <input type="number" id="camera-capture-interval" 
+                                   min="1" max="60" value="5" 
+                                   style="width: 60px; padding: 6px; border: 1px solid #ddd; border-radius: 6px; font-size: 13px;">
+                            <span style="font-size: 13px; color: #666;">秒</span>
+                        </div>
+                        <div style="font-size: 11px; color: #999; margin-top: 5px;">
+                            定时截取摄像头画面发送给AI，默认5秒
+                        </div>
+                        
+                        <!-- 摄像头状态 -->
+                        <div id="camera-status" style="margin-top: 10px; padding: 8px; background: #f9f9f9; border-radius: 6px; font-size: 12px; display: none;">
+                            <div style="display: flex; align-items: center; gap: 5px;">
+                                <span id="camera-status-icon" style="width: 8px; height: 8px; border-radius: 50%; background: #ccc;"></span>
+                                <span id="camera-status-text" style="color: #666;">摄像头未激活</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- 仅读取对话开关 -->
+                    <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #e0e0e0;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                            <label style="font-weight: 500; font-size: 13px;">仅读取对话内容</label>
+                            <label class="toggle-switch" style="transform: scale(0.9);">
+                                <input type="checkbox" id="tts-dialogue-only-switch">
+                                <span class="slider"></span>
+                            </label>
+                        </div>
+                        <div style="font-size: 11px; color: #666; line-height: 1.5;">
+                            启用后，语音播报只读取引号内的对话，不读取动作描写等旁白内容
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
 
         <!-- 记忆库区域 -->
         <div class="settings-section" id="memory-archive-section">
@@ -4643,6 +4783,13 @@
       <div class="modal-header"> <span>搜索结果</span> <label style="font-size: 14px; font-weight: normal; display: flex; align-items: center; gap: 5px;"> <input type="checkbox" id="select-all-music-search"> 全选 </label> </div>
       <div class="modal-body" id="search-results-list" style="padding: 0;"> </div>
       <div class="modal-footer"> <button class="cancel" id="cancel-music-search-btn"data-lang-key="cancel">取消</button> <button class="save" id="add-selected-music-btn"data-lang-key="add">添加选中</button> </div>
+    </div>
+  </div>
+  <div id="cleaned-songs-modal" class="modal">
+    <div class="modal-content" style="height: 70%;">
+      <div class="modal-header"> <span>被清理的歌曲</span> <label style="font-size: 14px; font-weight: normal; display: flex; align-items: center; gap: 5px;"> <input type="checkbox" id="select-all-cleaned-songs"> 全选 </label> </div>
+      <div class="modal-body" id="cleaned-songs-list" style="padding: 0;"> </div>
+      <div class="modal-footer"> <button class="cancel" id="close-cleaned-songs-btn">关闭</button> <button class="save" id="research-selected-songs-btn">重新搜索选中</button> </div>
     </div>
   </div>
   <div id="douban-settings-modal" class="modal">
