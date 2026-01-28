@@ -39425,13 +39425,15 @@ ${charactersContext}
         // 3. 如果不是 JSON，则视为纯 CSS 代码导入
         // 简单的防呆检查：CSS 通常包含 { 或 ;
         if (textContent.includes('{') || textContent.includes(';')) {
-            const cssConfirm = await showCustomConfirm(
+            const cssAction = await showChoiceModal(
                 '检测到 CSS 代码',
-                '文件内容似乎不是标准的 JSON 配置包，但看起来像 CSS 代码。\n\n是否将其直接应用到【全局自定义 CSS】中？(这将覆盖现有的 CSS)',
-                { confirmText: '应用为 CSS' }
+                [
+                    { text: '覆盖现有CSS', value: 'overwrite' },
+                    { text: '附加到现有CSS', value: 'append' }
+                ]
             );
 
-            if (cssConfirm) {
+            if (cssAction === 'overwrite') {
                 state.globalSettings.globalCss = textContent;
                 await db.globalSettings.put(state.globalSettings);
                 applyGlobalCss(state.globalSettings.globalCss);
@@ -39440,7 +39442,18 @@ ${charactersContext}
                 const cssInput = document.getElementById('global-css-input');
                 if (cssInput) cssInput.value = textContent;
 
-                await showCustomAlert('CSS导入成功', '代码已应用到全局样式表。');
+                await showCustomAlert('CSS导入成功', '代码已覆盖并应用到全局样式表。');
+            } else if (cssAction === 'append') {
+                const existingCss = state.globalSettings.globalCss || '';
+                state.globalSettings.globalCss = existingCss + '\n\n/* 导入的CSS */\n' + textContent;
+                await db.globalSettings.put(state.globalSettings);
+                applyGlobalCss(state.globalSettings.globalCss);
+                
+                // 刷新界面显示
+                const cssInput = document.getElementById('global-css-input');
+                if (cssInput) cssInput.value = state.globalSettings.globalCss;
+
+                await showCustomAlert('CSS导入成功', '代码已附加并应用到全局样式表。');
             }
         } else {
             throw new Error("无法识别文件内容。它既不是有效的 JSON 配置，也不像 CSS 代码。");
