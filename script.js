@@ -63132,6 +63132,865 @@ if (isGroup) {
       document.getElementById('quick-reply-modal').classList.remove('visible');
     });
 
+    // ========== 真心话游戏 ==========
+    let truthGameState = {
+      isActive: false,
+      currentRound: 0,
+      userChoice: null,
+      aiChoice: null,
+      winner: null,
+      messages: []
+    };
+
+    document.getElementById('open-truth-game-btn').addEventListener('click', () => {
+      if (!state.activeChatId) {
+        alert('请先选择一个聊天对象！');
+        return;
+      }
+      const chat = state.chats[state.activeChatId];
+      if (chat.isGroup) {
+        alert('真心话游戏仅支持单人聊天！');
+        return;
+      }
+      
+      if (!chat.settings.truthGameHistoryLimit) {
+        chat.settings.truthGameHistoryLimit = 5;
+      }
+      
+      truthGameState = {
+        isActive: true,
+        currentRound: 1,
+        userChoice: null,
+        aiChoice: null,
+        winner: null,
+        messages: [],
+        waitingForAI: false
+      };
+      document.getElementById('truth-game-modal').classList.add('visible');
+      document.getElementById('truth-input').value = '';
+      document.getElementById('truth-input').placeholder = '输入消息...';
+      document.getElementById('truth-rps-selector').style.display = 'flex';
+      renderTruthGameMessages();
+      addTruthGameMessage('system', `第${truthGameState.currentRound}轮：请选择石头、剪刀或布开始游戏！`);
+    });
+
+    document.getElementById('truth-game-settings-btn').addEventListener('click', () => {
+      if (!state.activeChatId) return;
+      const chat = state.chats[state.activeChatId];
+      
+      if (!chat.settings.truthGameHistoryLimit) {
+        chat.settings.truthGameHistoryLimit = 5;
+      }
+      
+      document.getElementById('truth-history-limit-input').value = chat.settings.truthGameHistoryLimit;
+      document.getElementById('truth-game-settings-modal').classList.add('visible');
+    });
+
+    document.getElementById('cancel-truth-settings-btn').addEventListener('click', () => {
+      document.getElementById('truth-game-settings-modal').classList.remove('visible');
+    });
+
+    document.getElementById('save-truth-settings-btn').addEventListener('click', async () => {
+      if (!state.activeChatId) return;
+      const chat = state.chats[state.activeChatId];
+      
+      const limit = parseInt(document.getElementById('truth-history-limit-input').value);
+      if (isNaN(limit) || limit < 1 || limit > 20) {
+        alert('请输入1-20之间的数字');
+        return;
+      }
+      
+      chat.settings.truthGameHistoryLimit = limit;
+      await db.chats.put(chat);
+      
+      document.getElementById('truth-game-settings-modal').classList.remove('visible');
+    });
+
+    document.getElementById('close-truth-game-btn').addEventListener('click', async () => {
+      if (truthGameState.messages.length > 1) {
+        const chat = state.chats[state.activeChatId];
+        
+        let gameRecord = '[真心话游戏记录] ';
+        let roundDetails = [];
+        let currentRound = '';
+        let currentWinner = null;
+        
+        for (let i = 0; i < truthGameState.messages.length; i++) {
+          const msg = truthGameState.messages[i];
+          
+          if (msg.role === 'system') {
+            if (msg.content.includes('第') && msg.content.includes('轮')) {
+              if (currentRound) {
+                roundDetails.push(currentRound);
+              }
+              currentRound = msg.content.replace('：请选择石头、剪刀或布开始游戏！', '').replace('：请选择石头、剪刀或布！', '') + ': ';
+              currentWinner = null;
+            } else if (msg.content.includes('你赢了')) {
+              currentRound += ' 结果: 我获胜';
+              currentWinner = 'user';
+            } else if (msg.content.includes(chat.name + '赢了')) {
+              currentRound += ' 结果: ' + chat.name + '获胜';
+              currentWinner = 'ai';
+            } else if (msg.content.includes('平局')) {
+              currentRound += ' 结果: 平局';
+              currentWinner = null;
+            }
+          } else if (msg.role === 'user') {
+            if (msg.content.startsWith('出了：')) {
+              currentRound += '我' + msg.content + ', ';
+            } else {
+              if (currentRound) {
+                roundDetails.push(currentRound);
+                currentRound = '';
+              }
+              if (currentWinner === 'user') {
+                roundDetails.push(`我提问: ${msg.content}`);
+              } else if (currentWinner === 'ai') {
+                roundDetails.push(`我回答: ${msg.content}`);
+              }
+            }
+          } else if (msg.role === 'assistant') {
+            if (msg.content.startsWith('出了：')) {
+              currentRound += chat.name + msg.content;
+            } else {
+              if (currentRound) {
+                roundDetails.push(currentRound);
+                currentRound = '';
+              }
+              if (currentWinner === 'ai') {
+                roundDetails.push(`${chat.name}提问: ${msg.content}`);
+              } else if (currentWinner === 'user') {
+                roundDetails.push(`${chat.name}回答: ${msg.content}`);
+              }
+            }
+          }
+        }
+        
+        if (currentRound) {
+          roundDetails.push(currentRound);
+        }
+        
+        gameRecord += roundDetails.join(' ');
+        
+        const recordMessage = {
+          role: 'system',
+          type: 'truth_game_record',
+          content: gameRecord,
+          timestamp: Date.now(),
+          isHidden: true
+        };
+        
+        chat.history.push(recordMessage);
+        await db.chats.put(chat);
+        
+        if (document.getElementById('chat-interface-screen').classList.contains('active') && state.activeChatId === chat.id) {
+          renderChatInterface(chat.id);
+        }
+        
+        renderChatList();
+      }
+      
+      document.getElementById('truth-game-modal').classList.remove('visible');
+    });
+
+    document.querySelectorAll('.truth-rps-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        if (!truthGameState.isActive || truthGameState.waitingForAI) return;
+        
+        const userChoice = btn.dataset.choice;
+        const choices = ['rock', 'scissors', 'paper'];
+        const aiChoice = choices[Math.floor(Math.random() * 3)];
+        
+        truthGameState.userChoice = userChoice;
+        truthGameState.aiChoice = aiChoice;
+        
+        const chat = state.chats[state.activeChatId];
+        const choiceText = {
+          rock: '石头',
+          scissors: '剪刀',
+          paper: '布'
+        };
+        
+        addTruthGameMessage('user', `出了：${choiceText[userChoice]}`);
+        
+        await new Promise(resolve => setTimeout(resolve, 800));
+        
+        addTruthGameMessage('assistant', `出了：${choiceText[aiChoice]}`);
+        
+        const winner = determineRPSWinner(userChoice, aiChoice);
+        truthGameState.winner = winner;
+        
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        if (winner === 'user') {
+          addTruthGameMessage('system', '你赢了！请向对方提问一个问题。');
+          document.getElementById('truth-rps-selector').style.display = 'none';
+          document.getElementById('truth-input').placeholder = '输入你想问的问题...';
+          document.getElementById('truth-input').focus();
+        } else if (winner === 'ai') {
+          addTruthGameMessage('system', `${chat.name}赢了！正在思考问题...`);
+          document.getElementById('truth-rps-selector').style.display = 'none';
+          truthGameState.waitingForAI = true;
+          await generateAITruthQuestion();
+          truthGameState.waitingForAI = false;
+        } else {
+          addTruthGameMessage('system', '平局！再来一次。');
+          truthGameState.currentRound++;
+          await new Promise(resolve => setTimeout(resolve, 800));
+          addTruthGameMessage('system', `第${truthGameState.currentRound}轮：请选择石头、剪刀或布！`);
+        }
+      });
+    });
+
+    document.getElementById('truth-send-btn').addEventListener('click', async () => {
+      const input = document.getElementById('truth-input');
+      const content = input.value.trim();
+      if (!content || truthGameState.waitingForAI) return;
+      
+      if (truthGameState.winner === 'user') {
+        addTruthGameMessage('user', content);
+        input.value = '';
+        input.style.height = 'auto';
+        truthGameState.waitingForAI = true;
+        await generateAITruthAnswer(content);
+        truthGameState.waitingForAI = false;
+      } else if (truthGameState.winner === 'ai') {
+        addTruthGameMessage('user', content);
+        input.value = '';
+        input.style.height = 'auto';
+        await new Promise(resolve => setTimeout(resolve, 500));
+        addTruthGameMessage('system', '回答完毕！准备下一轮...');
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        truthGameState.currentRound++;
+        truthGameState.winner = null;
+        document.getElementById('truth-rps-selector').style.display = 'flex';
+        document.getElementById('truth-input').placeholder = '输入消息...';
+        addTruthGameMessage('system', `第${truthGameState.currentRound}轮：请选择石头、剪刀或布！`);
+      } else {
+        addTruthGameMessage('user', content);
+        input.value = '';
+        input.style.height = 'auto';
+      }
+    });
+
+    document.getElementById('truth-call-api-btn').addEventListener('click', async () => {
+      if (!state.activeChatId || truthGameState.waitingForAI) return;
+      
+      const chat = state.chats[state.activeChatId];
+      truthGameState.waitingForAI = true;
+      
+      const input = document.getElementById('truth-input');
+      const userMessage = input.value.trim();
+      
+      if (userMessage) {
+        addTruthGameMessage('user', userMessage);
+        input.value = '';
+        input.style.height = 'auto';
+      }
+      
+      addTruthGameMessage('system', '正在调用API...');
+      
+      const { proxyUrl, apiKey, model } = state.apiConfig;
+      
+      if (!proxyUrl || !apiKey || !model) {
+        addTruthGameMessage('system', 'API配置不完整，请先在设置中配置。');
+        truthGameState.waitingForAI = false;
+        return;
+      }
+
+      const conversationHistory = truthGameState.messages
+        .filter(m => m.role === 'user' || m.role === 'assistant')
+        .slice(-6)
+        .map(m => ({
+          role: m.role === 'user' ? 'user' : 'assistant',
+          content: m.content
+        }));
+
+      const systemPrompt = buildTruthGamePrompt(chat, 'conversation');
+      conversationHistory.unshift({ role: 'system', content: systemPrompt });
+      
+      try {
+        const response = await fetch(`${proxyUrl}/v1/chat/completions`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`
+          },
+          body: JSON.stringify({
+            model: model,
+            messages: conversationHistory,
+            temperature: 0.8
+          })
+        });
+
+        if (!response.ok) throw new Error('API调用失败');
+        
+        const data = await response.json();
+        const reply = data.choices[0].message.content.trim();
+        
+        addTruthGameMessage('assistant', reply);
+      } catch (error) {
+        console.error('调用API失败:', error);
+        addTruthGameMessage('system', 'API调用失败，请检查配置。');
+      }
+      
+      truthGameState.waitingForAI = false;
+    });
+
+    document.getElementById('truth-input').addEventListener('keypress', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        document.getElementById('truth-send-btn').click();
+      }
+    });
+
+    document.getElementById('truth-input').addEventListener('input', function() {
+      this.style.height = 'auto';
+      this.style.height = Math.min(this.scrollHeight, 100) + 'px';
+    });
+
+    function determineRPSWinner(user, ai) {
+      if (user === ai) return 'draw';
+      if (
+        (user === 'rock' && ai === 'scissors') ||
+        (user === 'scissors' && ai === 'paper') ||
+        (user === 'paper' && ai === 'rock')
+      ) {
+        return 'user';
+      }
+      return 'ai';
+    }
+
+    function addTruthGameMessage(role, content) {
+      truthGameState.messages.push({ role, content, timestamp: Date.now() });
+      renderTruthGameMessages();
+    }
+
+    function renderTruthGameMessages() {
+      const container = document.getElementById('truth-game-messages');
+      const chat = state.chats[state.activeChatId];
+      const defaultAvatar = 'https://i.postimg.cc/y8xWzCqj/anime-boy.jpg';
+      const userAvatar = chat.settings?.myAvatar || defaultAvatar;
+      const aiAvatar = chat.settings?.aiAvatar || defaultAvatar;
+      
+      container.innerHTML = '';
+      
+      truthGameState.messages.forEach(msg => {
+        if (msg.role === 'system') {
+          const systemDiv = document.createElement('div');
+          systemDiv.style.cssText = 'text-align: center; color: #999; font-size: 12px; margin: 15px 0; padding: 5px;';
+          systemDiv.textContent = msg.content;
+          container.appendChild(systemDiv);
+        } else {
+          const wrapper = document.createElement('div');
+          wrapper.style.cssText = msg.role === 'user' 
+            ? 'display: flex; justify-content: flex-end; align-items: flex-end; margin: 10px 0; gap: 10px;'
+            : 'display: flex; justify-content: flex-start; align-items: flex-end; margin: 10px 0; gap: 10px;';
+          
+          const bubble = document.createElement('div');
+          bubble.style.cssText = msg.role === 'user'
+            ? 'background: #95ec69; padding: 10px 15px; border-radius: 4px; max-width: 60%; word-wrap: break-word; font-size: 14px; line-height: 1.5; cursor: pointer;'
+            : 'background: white; padding: 10px 15px; border-radius: 4px; max-width: 60%; word-wrap: break-word; font-size: 14px; line-height: 1.5; cursor: pointer;';
+          bubble.textContent = msg.content;
+          bubble.dataset.timestamp = msg.timestamp;
+          bubble.dataset.role = msg.role;
+          bubble.dataset.content = msg.content;
+          
+          const avatar = document.createElement('img');
+          avatar.src = msg.role === 'user' ? userAvatar : aiAvatar;
+          avatar.style.cssText = 'width: 40px; height: 40px; border-radius: 4px; object-fit: cover; flex-shrink: 0;';
+          
+          if (msg.role === 'user') {
+            wrapper.appendChild(bubble);
+            wrapper.appendChild(avatar);
+          } else {
+            wrapper.appendChild(avatar);
+            wrapper.appendChild(bubble);
+          }
+          
+          addLongPressListener(bubble, () => showTruthGameMessageActions(msg.timestamp));
+          
+          container.appendChild(wrapper);
+        }
+      });
+      
+      container.scrollTop = container.scrollHeight;
+    }
+
+    async function generateAITruthQuestion() {
+      const chat = state.chats[state.activeChatId];
+      const { proxyUrl, apiKey, model } = state.apiConfig;
+      
+      if (!proxyUrl || !apiKey || !model) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        addTruthGameMessage('assistant', '你最喜欢什么？');
+        document.getElementById('truth-input').placeholder = '输入你的回答...';
+        document.getElementById('truth-input').focus();
+        return;
+      }
+
+      const systemPrompt = buildTruthGamePrompt(chat, 'question');
+      
+      try {
+        const response = await fetch(`${proxyUrl}/v1/chat/completions`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`
+          },
+          body: JSON.stringify({
+            model: model,
+            messages: [{ role: 'user', content: systemPrompt }],
+            temperature: 0.8
+          })
+        });
+
+        if (!response.ok) throw new Error('API调用失败');
+        
+        const data = await response.json();
+        const rawContent = data.choices[0].message.content.trim();
+        
+        let messages = [];
+        try {
+          const parsed = JSON.parse(rawContent);
+          if (Array.isArray(parsed)) {
+            messages = parsed;
+          } else {
+            messages = [rawContent];
+          }
+        } catch {
+          messages = [rawContent];
+        }
+        
+        for (let i = 0; i < messages.length; i++) {
+          if (i > 0) {
+            await new Promise(resolve => setTimeout(resolve, 800));
+          }
+          addTruthGameMessage('assistant', messages[i]);
+        }
+        
+        document.getElementById('truth-input').placeholder = '输入你的回答...';
+        document.getElementById('truth-input').focus();
+      } catch (error) {
+        console.error('生成问题失败:', error);
+        addTruthGameMessage('assistant', '你最喜欢什么？');
+        document.getElementById('truth-input').placeholder = '输入你的回答...';
+        document.getElementById('truth-input').focus();
+      }
+    }
+
+    async function generateAITruthAnswer(question) {
+      const chat = state.chats[state.activeChatId];
+      const { proxyUrl, apiKey, model } = state.apiConfig;
+      
+      addTruthGameMessage('system', '对方正在思考答案...');
+      
+      if (!proxyUrl || !apiKey || !model) {
+        await new Promise(resolve => setTimeout(resolve, 1500));
+        addTruthGameMessage('assistant', '我...我不知道该怎么回答。');
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        addTruthGameMessage('system', '回答完毕！准备下一轮...');
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        truthGameState.currentRound++;
+        truthGameState.winner = null;
+        document.getElementById('truth-rps-selector').style.display = 'flex';
+        document.getElementById('truth-input').placeholder = '输入消息...';
+        addTruthGameMessage('system', `第${truthGameState.currentRound}轮：请选择石头、剪刀或布！`);
+        return;
+      }
+
+      const systemPrompt = buildTruthGamePrompt(chat, 'answer', question);
+      
+      try {
+        const response = await fetch(`${proxyUrl}/v1/chat/completions`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`
+          },
+          body: JSON.stringify({
+            model: model,
+            messages: [{ role: 'user', content: systemPrompt }],
+            temperature: 0.8
+          })
+        });
+
+        if (!response.ok) throw new Error('API调用失败');
+        
+        const data = await response.json();
+        const rawContent = data.choices[0].message.content.trim();
+        
+        let messages = [];
+        try {
+          const parsed = JSON.parse(rawContent);
+          if (Array.isArray(parsed)) {
+            messages = parsed;
+          } else {
+            messages = [rawContent];
+          }
+        } catch {
+          messages = [rawContent];
+        }
+        
+        for (let i = 0; i < messages.length; i++) {
+          if (i > 0) {
+            await new Promise(resolve => setTimeout(resolve, 800));
+          }
+          addTruthGameMessage('assistant', messages[i]);
+        }
+        
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        addTruthGameMessage('system', '回答完毕！准备下一轮...');
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        truthGameState.currentRound++;
+        truthGameState.winner = null;
+        document.getElementById('truth-rps-selector').style.display = 'flex';
+        document.getElementById('truth-input').placeholder = '输入消息...';
+        addTruthGameMessage('system', `第${truthGameState.currentRound}轮：请选择石头、剪刀或布！`);
+      } catch (error) {
+        console.error('生成回答失败:', error);
+        addTruthGameMessage('assistant', '我...我不知道该怎么回答。');
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        addTruthGameMessage('system', '回答完毕！准备下一轮...');
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        truthGameState.currentRound++;
+        truthGameState.winner = null;
+        document.getElementById('truth-rps-selector').style.display = 'flex';
+        document.getElementById('truth-input').placeholder = '输入消息...';
+        addTruthGameMessage('system', `第${truthGameState.currentRound}轮：请选择石头、剪刀或布！`);
+      }
+    }
+
+    function buildTruthGamePrompt(chat, type, question = '') {
+      let prompt = '';
+      
+      const longTermMemoryContext = chat.longTermMemory && chat.longTermMemory.length > 0 
+        ? `\n\n# 长期记忆 (你和用户之间已经确立的事实)\n${chat.longTermMemory.map(mem => `- ${mem.content}`).join('\n')}`
+        : '';
+
+      const summary3Hours = generateSummaryForTimeframe(chat, 3, 'hours');
+      const summary6Hours = generateSummaryForTimeframe(chat, 6, 'hours');
+      const summaryToday = generateSummaryForTimeframe(chat, 1, 'days');
+      const summary3Days = generateSummaryForTimeframe(chat, 3, 'days');
+
+      let shortTermMemoryContext = '';
+      if (summary3Hours || summary6Hours || summaryToday || summary3Days) {
+        shortTermMemoryContext = '\n\n# 短期记忆 (最近的对话回顾)\n';
+        if (summary3Hours) shortTermMemoryContext += summary3Hours;
+        if (summary6Hours) shortTermMemoryContext += summary6Hours;
+        if (summaryToday) shortTermMemoryContext += summaryToday;
+        if (summary3Days) shortTermMemoryContext += summary3Days;
+      }
+
+      const worldBookContext = chat.worldBook && chat.worldBook.length > 0
+        ? `\n\n# 世界观设定\n${chat.worldBook.slice(0, 5).map(e => `${e.keyword}: ${e.content}`).join('\n')}`
+        : '';
+
+      const mountedMemoryContext = chat.mountedMemories && chat.mountedMemories.length > 0
+        ? `\n\n# 挂载记忆\n${chat.mountedMemories.map(mem => `- ${mem.content}`).join('\n')}`
+        : '';
+
+      const historyLimit = chat.settings.truthGameHistoryLimit || 5;
+      const recentMessages = truthGameState.messages.slice(-historyLimit * 6);
+      
+      let truthGameHistoryContext = '';
+      if (recentMessages.length > 0) {
+        truthGameHistoryContext = '\n\n# 真心话游戏历史 (最近的对话)\n';
+        recentMessages.forEach(msg => {
+          if (msg.role === 'user') {
+            truthGameHistoryContext += `用户: ${msg.content}\n`;
+          } else if (msg.role === 'assistant') {
+            truthGameHistoryContext += `你: ${msg.content}\n`;
+          } else if (msg.role === 'system' && !msg.content.includes('正在')) {
+            truthGameHistoryContext += `[${msg.content}]\n`;
+          }
+        });
+      }
+      
+      if (type === 'question') {
+        prompt = `# 你的角色设定
+${chat.settings.aiPersona}
+
+# 用户人设
+${chat.settings.userPersona || '普通用户'}
+${longTermMemoryContext}
+${shortTermMemoryContext}
+${worldBookContext}
+${mountedMemoryContext}
+${truthGameHistoryContext}
+
+# 任务
+你刚刚在真心话游戏中赢了，现在轮到你向用户提问一个问题。请根据你的角色设定、你们的关系和记忆，提出一个有趣的真心话问题。
+
+# 重要规则
+- 你可以发送多条消息来表达你的情绪、反应或调侃
+- 但是一轮游戏中你只能提出一个问题
+- 如果你想发多条消息，请用JSON数组格式输出，例如：["哈哈，我赢了！", "让我想想问什么好...", "你最喜欢的人是谁？"]
+- 如果只想问一个问题，直接输出问题文本即可
+
+# 要求
+- 问题要符合你的角色性格
+- 可以是关于情感、经历、想法等方面的问题
+- 可以结合你们的记忆和关系提问
+- 最后一条消息必须是问题
+- 不要有其他解释或标注
+
+现在请提出你的问题：`;
+      } else if (type === 'answer') {
+        prompt = `# 你的角色设定
+${chat.settings.aiPersona}
+
+# 用户人设
+${chat.settings.userPersona || '普通用户'}
+${longTermMemoryContext}
+${shortTermMemoryContext}
+${worldBookContext}
+${mountedMemoryContext}
+${truthGameHistoryContext}
+
+# 当前情况
+在真心话游戏中，你输了，现在用户问了你一个问题，你必须诚实回答。
+
+# 用户的问题
+${question}
+
+# 重要规则
+- 你可以发送多条消息来表达你的情绪、反应
+- 例如：["啊...这个问题...", "好吧，我告诉你", "其实我最喜欢的是..."]
+- 如果你想发多条消息，请用JSON数组格式输出
+- 如果只想回答一句话，直接输出回答文本即可
+
+# 要求
+- 必须根据你的角色设定和记忆诚实回答
+- 回答要符合你的性格和说话方式
+- 可以表现出害羞、犹豫等情绪，但最终要给出真实回答
+- 不要有其他解释或标注
+
+现在请回答这个问题：`;
+      } else if (type === 'conversation') {
+        prompt = `# 你的角色设定
+${chat.settings.aiPersona}
+
+# 用户人设
+${chat.settings.userPersona || '普通用户'}
+${longTermMemoryContext}
+${shortTermMemoryContext}
+${worldBookContext}
+${mountedMemoryContext}
+${truthGameHistoryContext}
+
+# 当前情况
+你正在和用户玩真心话游戏，请根据对话历史和你的角色设定自然地回复。
+
+# 重要规则
+- 你可以发送多条消息来表达你的想法
+- 如果你想发多条消息，请用JSON数组格式输出，例如：["嗯...", "这个嘛", "我觉得..."]
+- 如果只想回复一句话，直接输出回复文本即可
+
+# 要求
+- 回答要符合你的角色性格和说话方式
+- 保持对话自然流畅
+- 不要有其他解释或标注`;
+      }
+
+      return prompt;
+    }
+
+    let activeTruthGameMessageTimestamp = null;
+
+    function showTruthGameMessageActions(timestamp) {
+      activeTruthGameMessageTimestamp = timestamp;
+      const message = truthGameState.messages.find(m => m.timestamp === timestamp);
+      
+      document.getElementById('message-actions-modal').classList.add('visible');
+      
+      document.getElementById('edit-message-btn').style.display = 'block';
+      document.getElementById('edit-message-btn').textContent = '编辑';
+      document.getElementById('recall-message-btn').style.display = 'block';
+      document.getElementById('recall-message-btn').textContent = message.role === 'assistant' ? '重说' : '删除';
+      document.getElementById('publish-to-announcement-btn').style.display = 'none';
+      document.getElementById('quote-message-btn').style.display = 'none';
+      document.getElementById('forward-message-btn').style.display = 'none';
+      document.getElementById('select-message-btn').style.display = 'none';
+    }
+
+    const truthGameOriginalHandlers = {
+      cancel: null,
+      copy: null,
+      copyTimestamp: null,
+      translate: null,
+      edit: null,
+      recall: null
+    };
+
+    function closeTruthGameMessageActions() {
+      document.getElementById('message-actions-modal').classList.remove('visible');
+      activeTruthGameMessageTimestamp = null;
+      document.getElementById('recall-message-btn').textContent = '撤回';
+    }
+
+    document.getElementById('cancel-message-action-btn').addEventListener('click', () => {
+      if (activeTruthGameMessageTimestamp) {
+        closeTruthGameMessageActions();
+      }
+    });
+
+    document.getElementById('copy-message-btn').addEventListener('click', () => {
+      if (activeTruthGameMessageTimestamp) {
+        const message = truthGameState.messages.find(m => m.timestamp === activeTruthGameMessageTimestamp);
+        if (message) {
+          navigator.clipboard.writeText(message.content);
+          closeTruthGameMessageActions();
+        }
+      }
+    });
+
+    document.getElementById('copy-timestamp-btn').addEventListener('click', () => {
+      if (activeTruthGameMessageTimestamp) {
+        const date = new Date(activeTruthGameMessageTimestamp);
+        const timeStr = `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')} ${String(date.getHours()).padStart(2,'0')}:${String(date.getMinutes()).padStart(2,'0')}:${String(date.getSeconds()).padStart(2,'0')}`;
+        navigator.clipboard.writeText(timeStr);
+        closeTruthGameMessageActions();
+      }
+    });
+
+    document.getElementById('translate-message-btn').addEventListener('click', async () => {
+      if (activeTruthGameMessageTimestamp) {
+        const message = truthGameState.messages.find(m => m.timestamp === activeTruthGameMessageTimestamp);
+        if (message && message.content) {
+          closeTruthGameMessageActions();
+          
+          try {
+            await showCustomAlert('翻译中...', '正在调用翻译服务，请稍候...');
+            const textToSend = message.content.length > 500 ? message.content.substring(0, 500) + '...' : message.content;
+            
+            const { proxyUrl, apiKey, model } = state.apiConfig;
+            if (!proxyUrl || !apiKey || !model) {
+              await showCustomAlert('翻译失败', '请先配置API设置。');
+              return;
+            }
+
+            const response = await fetch(`${proxyUrl}/v1/chat/completions`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${apiKey}`
+              },
+              body: JSON.stringify({
+                model: model,
+                messages: [{
+                  role: 'user',
+                  content: `请将以下内容翻译成中文，只输出翻译结果，不要有任何解释：\n\n${textToSend}`
+                }],
+                temperature: 0.3
+              })
+            });
+
+            if (!response.ok) throw new Error('翻译失败');
+            
+            const data = await response.json();
+            const translation = data.choices[0].message.content.trim();
+            
+            await showCustomAlert('翻译结果', translation);
+          } catch (error) {
+            await showCustomAlert('翻译失败', '翻译服务出错，请稍后重试。');
+          }
+        }
+      }
+    });
+
+    document.getElementById('edit-message-btn').addEventListener('click', async () => {
+      if (activeTruthGameMessageTimestamp) {
+        const message = truthGameState.messages.find(m => m.timestamp === activeTruthGameMessageTimestamp);
+        if (message) {
+          closeTruthGameMessageActions();
+          
+          const newContent = prompt('编辑消息内容：', message.content);
+          if (newContent !== null && newContent.trim() !== '') {
+            message.content = newContent.trim();
+            renderTruthGameMessages();
+          }
+        }
+      }
+    });
+
+    document.getElementById('recall-message-btn').addEventListener('click', async () => {
+      if (activeTruthGameMessageTimestamp) {
+        const message = truthGameState.messages.find(m => m.timestamp === activeTruthGameMessageTimestamp);
+        if (!message) return;
+        
+        closeTruthGameMessageActions();
+        
+        if (message.role === 'assistant') {
+          const chat = state.chats[state.activeChatId];
+          const { proxyUrl, apiKey, model } = state.apiConfig;
+          
+          if (!proxyUrl || !apiKey || !model) {
+            alert('请先配置API设置。');
+            return;
+          }
+
+          const messageIndex = truthGameState.messages.findIndex(m => m.timestamp === activeTruthGameMessageTimestamp);
+          if (messageIndex === -1) return;
+
+          const previousMessage = truthGameState.messages[messageIndex - 1];
+          
+          truthGameState.waitingForAI = true;
+          addTruthGameMessage('system', '正在重新生成...');
+
+          let prompt = '';
+          if (previousMessage && previousMessage.role === 'user') {
+            if (truthGameState.winner === 'ai') {
+              prompt = buildTruthGamePrompt(chat, 'question');
+            } else if (truthGameState.winner === 'user') {
+              prompt = buildTruthGamePrompt(chat, 'answer', previousMessage.content);
+            } else {
+              prompt = buildTruthGamePrompt(chat, 'conversation');
+            }
+          } else {
+            prompt = buildTruthGamePrompt(chat, 'conversation');
+          }
+
+          try {
+            const response = await fetch(`${proxyUrl}/v1/chat/completions`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${apiKey}`
+              },
+              body: JSON.stringify({
+                model: model,
+                messages: [{ role: 'user', content: prompt }],
+                temperature: 0.8
+              })
+            });
+
+            if (!response.ok) throw new Error('API调用失败');
+            
+            const data = await response.json();
+            const newReply = data.choices[0].message.content.trim();
+            
+            message.content = newReply;
+            truthGameState.messages = truthGameState.messages.filter(m => m.role !== 'system' || !m.content.includes('正在重新生成'));
+            renderTruthGameMessages();
+          } catch (error) {
+            console.error('重说失败:', error);
+            truthGameState.messages = truthGameState.messages.filter(m => m.role !== 'system' || !m.content.includes('正在重新生成'));
+            addTruthGameMessage('system', '重新生成失败，请稍后重试。');
+          }
+          
+          truthGameState.waitingForAI = false;
+        } else {
+          const confirmed = confirm('确定要删除这条消息吗？');
+          if (confirmed) {
+            truthGameState.messages = truthGameState.messages.filter(m => m.timestamp !== activeTruthGameMessageTimestamp);
+            renderTruthGameMessages();
+          }
+        }
+      }
+    });
+    // ========== 真心话游戏结束 ==========
+
 
     document.getElementById('add-quick-reply-btn').addEventListener('click', addNewQuickReply);
 
