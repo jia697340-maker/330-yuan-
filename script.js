@@ -10318,7 +10318,8 @@ https://xx.com/4.jpg 疑惑`;
     if (msg.role === 'assistant' && msg.type !== 'recalled_message' && msg.type !== 'post_deleted_notice' && 
         msg.type !== 'narration' && msg.type !== 'pat_message' && !msg.type?.startsWith('waimai_') && 
         msg.type !== 'red_packet' && msg.type !== 'transfer' && msg.type !== 'poll' && msg.type !== 'gift' && 
-        msg.type !== 'kinship_request' && msg.type !== 'synth_music') {
+        msg.type !== 'kinship_request' && msg.type !== 'synth_music' && msg.type !== 'naiimag' && msg.type !== 'realimag' && 
+        msg.type !== 'ai_image' && msg.type !== 'user_photo') {
       const contentStr = String(msg.content || '').trim().toLowerCase();
       if (contentStr === '' || contentStr === 'undefined') {
         console.log('[QQ Undefined过滤] 已过滤空消息或undefined消息:', msg);
@@ -16002,7 +16003,7 @@ case 'decline_transfer': {
                 notificationText = aiMessage.meaning ? `[表情: ${aiMessage.meaning}]` : '[表情]';
                 break;
               case 'offline_text':
-                notificationText = aiMessage.dialogue ? `「${aiMessage.dialogue}」` : `[${aiMessage.description.substring(0, 20)}...]`;
+                notificationText = aiMessage.dialogue ? `「${aiMessage.dialogue}」` : `[${(aiMessage.description || aiMessage.content || '线下消息').substring(0, 20)}...]`;
                 break;
               default:
                 notificationText = String(aiMessage.content || '');
@@ -16030,7 +16031,7 @@ case 'decline_transfer': {
                 notificationText = aiMessage.meaning ? `[表情: ${aiMessage.meaning}]` : '[表情]';
                 break;
               case 'offline_text':
-                notificationText = aiMessage.dialogue ? `「${aiMessage.dialogue}」` : `[${aiMessage.description.substring(0, 20)}...]`;
+                notificationText = aiMessage.dialogue ? `「${aiMessage.dialogue}」` : `[${(aiMessage.description || aiMessage.content || '线下消息').substring(0, 20)}...]`;
                 break;
               default:
                 notificationText = String(aiMessage.content || '');
@@ -38484,7 +38485,13 @@ ${recentHistory}
 
     const data = await response.json();
     const aiResponseContent = getGeminiResponseText(data);
-    const cleanedJson = aiResponseContent.replace(/^```json\s*/, '').replace(/```$/, '').trim();
+    
+    // 使用正则提取 JSON 数组，更健壮地处理 AI 返回的额外文本
+    const jsonMatch = aiResponseContent.match(/(\[[\s\S]*\])/);
+    if (!jsonMatch || !jsonMatch[0]) {
+      throw new Error(`AI返回的内容中未找到有效的JSON数组。原始返回: ${aiResponseContent}`);
+    }
+    const cleanedJson = jsonMatch[0];
     const conversations = JSON.parse(cleanedJson);
 
     chat.myPhoneSimulatedQQConversations = conversations;
@@ -38553,7 +38560,13 @@ ${recentHistory}
 
     const data = await response.json();
     const aiResponseContent = getGeminiResponseText(data);
-    const cleanedJson = aiResponseContent.replace(/^```json\s*/, '').replace(/```$/, '').trim();
+    
+    // 使用正则提取 JSON 数组，更健壮地处理 AI 返回的额外文本
+    const jsonMatch = aiResponseContent.match(/(\[[\s\S]*\])/);
+    if (!jsonMatch || !jsonMatch[0]) {
+      throw new Error(`AI返回的内容中未找到有效的JSON数组。原始返回: ${aiResponseContent}`);
+    }
+    const cleanedJson = jsonMatch[0];
     const photos = JSON.parse(cleanedJson);
 
     chat.myPhoneAlbum = photos;
@@ -38623,7 +38636,13 @@ ${recentHistory}
 
     const data = await response.json();
     const aiResponseContent = getGeminiResponseText(data);
-    const cleanedJson = aiResponseContent.replace(/^```json\s*/, '').replace(/```$/, '').trim();
+    
+    // 使用正则提取 JSON 数组，更健壮地处理 AI 返回的额外文本
+    const jsonMatch = aiResponseContent.match(/(\[[\s\S]*\])/);
+    if (!jsonMatch || !jsonMatch[0]) {
+      throw new Error(`AI返回的内容中未找到有效的JSON数组。原始返回: ${aiResponseContent}`);
+    }
+    const cleanedJson = jsonMatch[0];
     const history = JSON.parse(cleanedJson);
 
     chat.myPhoneBrowserHistory = history;
@@ -38763,7 +38782,13 @@ ${recentHistory}
 
     const data = await response.json();
     const aiResponseContent = getGeminiResponseText(data);
-    const cleanedJson = aiResponseContent.replace(/^```json\s*/, '').replace(/```$/, '').trim();
+    
+    // 使用正则提取 JSON 数组，更健壮地处理 AI 返回的额外文本
+    const jsonMatch = aiResponseContent.match(/(\[[\s\S]*\])/);
+    if (!jsonMatch || !jsonMatch[0]) {
+      throw new Error(`AI返回的内容中未找到有效的JSON数组。原始返回: ${aiResponseContent}`);
+    }
+    const cleanedJson = jsonMatch[0];
     const memos = JSON.parse(cleanedJson);
 
     chat.myPhoneMemos = memos;
@@ -38833,7 +38858,13 @@ ${recentHistory}
 
     const data = await response.json();
     const aiResponseContent = getGeminiResponseText(data);
-    const cleanedJson = aiResponseContent.replace(/^```json\s*/, '').replace(/```$/, '').trim();
+    
+    // 使用正则提取 JSON 数组，更健壮地处理 AI 返回的额外文本
+    const jsonMatch = aiResponseContent.match(/(\[[\s\S]*\])/);
+    if (!jsonMatch || !jsonMatch[0]) {
+      throw new Error(`AI返回的内容中未找到有效的JSON数组。原始返回: ${aiResponseContent}`);
+    }
+    const cleanedJson = jsonMatch[0];
     const diaries = JSON.parse(cleanedJson);
 
     chat.myPhoneDiaries = diaries;
@@ -38903,7 +38934,13 @@ ${recentHistory}
 
     const data = await response.json();
     const aiResponseContent = getGeminiResponseText(data);
-    const cleanedJson = aiResponseContent.replace(/^```json\s*/, '').replace(/```$/, '').trim();
+    
+    // 使用正则提取 JSON 数组，更健壮地处理 AI 返回的额外文本
+    const jsonMatch = aiResponseContent.match(/(\[[\s\S]*\])/);
+    if (!jsonMatch || !jsonMatch[0]) {
+      throw new Error(`AI返回的内容中未找到有效的JSON数组。原始返回: ${aiResponseContent}`);
+    }
+    const cleanedJson = jsonMatch[0];
     const locations = JSON.parse(cleanedJson);
 
     chat.myPhoneAmapHistory = locations;
@@ -39010,7 +39047,13 @@ ${recentHistory}
 
     const data = await response.json();
     const aiResponseContent = getGeminiResponseText(data);
-    const cleanedJson = aiResponseContent.replace(/^```json\s*/, '').replace(/```$/, '').trim();
+    
+    // 使用正则提取 JSON 数组，更健壮地处理 AI 返回的额外文本
+    const jsonMatch = aiResponseContent.match(/(\[[\s\S]*\])/);
+    if (!jsonMatch || !jsonMatch[0]) {
+      throw new Error(`AI返回的内容中未找到有效的JSON数组。原始返回: ${aiResponseContent}`);
+    }
+    const cleanedJson = jsonMatch[0];
     const playlist = JSON.parse(cleanedJson);
 
     chat.myPhoneMusicPlaylist = playlist;
