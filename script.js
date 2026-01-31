@@ -2400,6 +2400,9 @@ document.getElementById('char-city-search-btn').addEventListener('click', async 
     ttsCache: new Map(),
     quickReplies: []
   };
+  
+  // 【新增】暴露 state 到 window，供联机功能访问
+  window.state = state;
 
 let memoryCache = []; // 缓存所有需要显示的记忆
 let memoryRenderCount = 0; // 当前已渲染数量
@@ -11090,6 +11093,8 @@ const MAX_DOM_NODES = 60;
     }
   }
 
+  // 【新增】暴露 appendMessage 到 window，供联机功能使用
+  window.appendMessage = appendMessage;
 
 
   async function openChat(chatId) {
@@ -56668,16 +56673,40 @@ ${recentHistoryWithUser}
 
       try {
         let isGemini = url === GEMINI_API_URL;
-        const response = await fetch(isGemini ? `${GEMINI_API_URL}?key=${getRandomValue(key)}` : `${url}/v1/models`, isGemini ? undefined : {
+        const fetchOptions = isGemini ? {
+          method: 'GET',
+          mode: 'cors',
+          cache: 'no-cache',
+          credentials: 'omit'
+        } : {
+          method: 'GET',
+          mode: 'cors',
+          cache: 'no-cache',
+          credentials: 'omit',
           headers: {
-            'Authorization': `Bearer ${key}`
+            'Authorization': `Bearer ${key}`,
+            'Content-Type': 'application/json'
           }
-        });
-        if (!response.ok) throw new Error('无法获取模型列表');
+        };
+        
+        const response = await fetch(
+          isGemini ? `${GEMINI_API_URL}?key=${getRandomValue(key)}` : `${url}/v1/models`, 
+          fetchOptions
+        );
+        
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`无法获取模型列表 (${response.status}): ${errorText}`);
+        }
+        
         const data = await response.json();
         let models = isGemini ? data.models.map(model => ({
           id: model.name.split('/')[1] || model.name
         })) : data.data;
+
+        if (!models || models.length === 0) {
+          throw new Error('返回的模型列表为空');
+        }
 
         const modelSelect = document.getElementById(selectId);
         modelSelect.innerHTML = '';
@@ -56693,6 +56722,7 @@ ${recentHistoryWithUser}
         });
         alert('模型列表已更新');
       } catch (error) {
+        console.error('拉取模型失败:', error);
         alert(`拉取模型失败: ${error.message}`);
       }
     }
