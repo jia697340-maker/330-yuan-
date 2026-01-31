@@ -2806,9 +2806,9 @@ let selectedQuickReplies = new Set();
     'amap': 'https://i.postimg.cc/Jz2Tz0dw/IMG-7281.jpg',
     'usage': 'https://i.postimg.cc/WbF8kzz9/IMG-7282.jpg',
     'music': 'https://is1-ssl.mzstatic.com/image/thumb/Purple112/v4/64/9d/21/649d21e8-a151-6136-3914-256e54f15d9a/AppIcon-0-0-1x_U007emarketing-0-0-0-7-0-0-sRGB-0-0-0-GLES2_U002c0-512MB-85-220-0-0.png/1200x630wa.png',
-    'bilibili': 'https://i.postimg.cc/Wz5gV0jB/bilibili-icon.png',
-    'reddit': 'https://www.redditinc.com/assets/images/site/reddit-logo.png',
-    'cphone': 'https://i.postimg.cc/pXj9h20L/IMG-7275.jpg'
+    'settings': 'https://i.postimg.cc/hvFpZYjJ/IMG-7283.jpg',
+    'records': 'https://i.postimg.cc/fyXNLqYL/IMG-7284.jpg',
+    'ephone': 'https://i.postimg.cc/pXj9h20L/IMG-7275.jpg'
   };
 
   let repostTargetId = null;
@@ -3858,11 +3858,71 @@ function showChoiceModal(title, options) {
   });
 
   window.db = db;
+  
+  // 确保数据库完全打开和就绪
+  window.dbReady = false;
+  window.dbReadyPromise = db.open().then(() => {
+    console.log('数据库已完全初始化并打开');
+    console.log('数据库表状态检查:', {
+      chats: !!db.chats,
+      messages: !!db.messages,
+      chatsType: typeof db.chats,
+      messagesType: typeof db.messages
+    });
+    window.dbReady = true;
+    // 触发自定义事件通知数据库已就绪
+    window.dispatchEvent(new Event('dbready'));
+    return db;
+  }).catch(err => {
+    console.error('数据库打开失败:', err);
+    window.dbReady = false;
+    throw err;
+  });
 
 
 
 
   function showScreen(screenId) {
+    // 检查是否从你画我猜屏幕离开
+    const currentActiveScreen = document.querySelector('.screen.active');
+    if (currentActiveScreen && currentActiveScreen.id === 'draw-guess-screen' && screenId !== 'draw-guess-screen') {
+      // 正在离开你画我猜屏幕
+      if (drawGuessState.isActive && drawGuessState.partnerId && drawGuessState.history.length > 1) {
+        // 有游戏记录，将其发送到聊天历史
+        (async () => {
+          try {
+            const chat = state.chats[drawGuessState.partnerId];
+            if (chat) {
+              const userNickname = chat.settings.myNickname || '我';
+              
+              // 构建游戏记录摘要
+              let gameRecord = `[系统提示：刚刚你们玩了你画我猜游戏。以下是游戏的对话记录]\n\n`;
+              
+              drawGuessState.history.forEach(msg => {
+                gameRecord += `${msg.sender}: ${msg.content}\n`;
+              });
+              
+              // 添加为灰色系统消息和隐藏调试层
+              const gameLog = {
+                role: 'system',
+                content: gameRecord,
+                timestamp: Date.now(),
+                isHidden: true,
+                isGrayNotice: true
+              };
+              
+              chat.history.push(gameLog);
+              await db.chats.put(chat);
+              
+              console.log(`[你画我猜记录] 已将游戏记录添加到 ${chat.name} 的聊天历史中`);
+            }
+          } catch (error) {
+            console.error('[你画我猜记录] 保存游戏记录失败:', error);
+          }
+        })();
+      }
+    }
+    
     if (screenId === 'chat-list-screen') {
       window.renderChatListProxy();
       switchToChatListView('messages-view');
@@ -5594,6 +5654,7 @@ function showChoiceModal(title, options) {
       cphoneAppIcons: {
         ...DEFAULT_CPHONE_ICONS
       },
+      myphoneWallpaper: 'linear-gradient(135deg, #a8edea, #fed6e3)',
       myphoneAppIcons: {
         ...DEFAULT_MYPHONE_ICONS
       },
@@ -8454,6 +8515,16 @@ Promise.all(imageLoadPromises).then(() => {
     } else {
       cphonePreview.style.backgroundImage = 'linear-gradient(135deg, #f6d365, #fda085)';
       cphonePreview.textContent = '当前为渐变色';
+    }
+
+    const myphonePreview = document.getElementById('myphone-wallpaper-preview');
+    const myphoneBg = state.globalSettings.myphoneWallpaper;
+    if (myphoneBg) {
+      myphonePreview.style.backgroundImage = `url("${myphoneBg}")`;
+      myphonePreview.textContent = '';
+    } else {
+      myphonePreview.style.backgroundImage = 'linear-gradient(135deg, #a8edea, #fed6e3)';
+      myphonePreview.textContent = '当前为渐变色';
     }
 
     const globalBgPreview = document.getElementById('global-bg-preview');
@@ -23661,6 +23732,18 @@ async function handlePacketClick(timestamp) {
     }
   }
 
+  function applyMyPhoneWallpaper() {
+    const myphoneScreen = document.getElementById('myphone-screen');
+    const wallpaper = state.globalSettings.myphoneWallpaper;
+    if (wallpaper) {
+
+      myphoneScreen.style.backgroundImage = `url("${wallpaper}")`;
+    } else {
+
+      myphoneScreen.style.backgroundImage = 'linear-gradient(135deg, #a8edea, #fed6e3)';
+    }
+  }
+
  
   function applyCPhoneAppIcons() {
     // 先保存所有 CPhone 应用图标的默认 src（如果还没保存的话）
@@ -23753,9 +23836,9 @@ async function handlePacketClick(timestamp) {
       'amap': '高德地图',
       'usage': 'App记录',
       'music': '网易云',
-      'bilibili': '哔哩哔哩',
-      'reddit': 'Reddit',
-      'cphone': 'Cphone'
+      'settings': '设置',
+      'records': '查看记录',
+      'ephone': 'Ephone'
     };
 
     for (const iconId in state.globalSettings.myphoneAppIcons) {
@@ -33002,6 +33085,7 @@ window.toggleReadingFullscreen = toggleReadingFullscreen;
 
       applyGlobalWallpaper();
       applyCPhoneWallpaper();
+      applyMyPhoneWallpaper();
       renderIconSettings();       
       renderCPhoneIconSettings();
       renderMyPhoneIconSettings();
@@ -34690,6 +34774,8 @@ window.toggleReadingFullscreen = toggleReadingFullscreen;
 
     applyCPhoneWallpaper();
     applyCPhoneAppIcons();
+    applyMyPhoneWallpaper();
+    applyMyPhoneAppIconsGlobal();
 
 
     renderCharHomeScreen();
@@ -34815,9 +34901,7 @@ window.editBubbleText = async function(elementId) {
       'diary': '日记',
       'amap': '高德地图',
       'usage': 'APP使用记录',
-      'music': '网易云音乐',
-      'bilibili': '哔哩哔哩',
-      'reddit': 'Reddit'
+      'music': '网易云音乐'
     };
     
     let systemMessage = `[系统通知] ${timeStr}\n用户打开了你的手机，并且点开了${appNameMap[appName] || appName} APP`;
@@ -34847,12 +34931,6 @@ window.editBubbleText = async function(elementId) {
     } else if (appName === 'music') {
       systemMessage += `查看了你的音乐`;
       detailContent = `\n\n【歌曲】${itemData.title || ''}\n【艺术家】${itemData.artist || ''}\n【专辑】${itemData.album || ''}`;
-    } else if (appName === 'bilibili') {
-      systemMessage += `查看了你的B站观看历史`;
-      detailContent = `\n\n【标题】${itemData.title || ''}\n【UP主】${itemData.author || ''}\n【简介】${itemData.desc || ''}`;
-    } else if (appName === 'reddit') {
-      systemMessage += `查看了你的Reddit浏览内容`;
-      detailContent = `\n\n【标题】${itemData.title || ''}\n【内容】${itemData.content || ''}`;
     }
     
     systemMessage += detailContent;
@@ -39069,148 +39147,6 @@ ${recentHistory}
   }
 }
 
-async function handleGenerateMyPhoneReddit() {
-  if (!activeMyPhoneCharacterId) return;
-  const chat = state.chats[activeMyPhoneCharacterId];
-  if (!chat) return;
-
-  const { proxyUrl, apiKey, model } = state.apiConfig;
-  if (!proxyUrl || !apiKey || !model) {
-    alert('请先在API设置中配置好API信息。');
-    return;
-  }
-
-  const userDisplayNameForAI = (state.qzoneSettings.nickname === '{{user}}' || !state.qzoneSettings.nickname) ? '用户' : state.qzoneSettings.nickname;
-  
-  const maxMemory = chat.settings.maxMemory || 10;
-  const recentHistory = chat.history.slice(-maxMemory).map(msg => 
-    `${msg.role === 'user' ? userDisplayNameForAI : chat.name}: ${String(msg.content).substring(0, 50)}...`
-  ).join('\n');
-  
-  const prompt = `你现在要扮演"${userDisplayNameForAI}"（也就是我），基于我与"${chat.name}"的对话历史，推测我的兴趣领域，然后生成我可能浏览的Reddit帖子。
-
-## 我与"${chat.name}"的最近对话：
-${recentHistory}
-
-## 任务：
-请基于以上对话推测我的特征，然后生成我可能浏览的5-8条Reddit帖子。
-
-返回JSON格式：
-[
-  {
-    "title": "帖子标题",
-    "subreddit": "子版块名",
-    "author": "作者名",
-    "score": 点赞数
-  }
-]`;
-
-  try {
-    const messagesForApi = [{ role: 'user', content: prompt }];
-    let isGemini = proxyUrl.includes('generativelanguage');
-    let geminiConfig = toGeminiRequestData(model, apiKey, '', messagesForApi);
-
-    const response = isGemini ?
-      await fetch(geminiConfig.url, geminiConfig.data) :
-      await fetch(`${proxyUrl}/v1/chat/completions`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`
-        },
-        body: JSON.stringify({
-          model: model,
-          messages: messagesForApi,
-          temperature: 0.8
-        })
-      });
-
-    if (!response.ok) throw new Error(`API 错误: ${response.statusText}`);
-
-    const data = await response.json();
-    const aiResponseContent = getGeminiResponseText(data);
-    const cleanedJson = aiResponseContent.replace(/^```json\s*/, '').replace(/```$/, '').trim();
-    const posts = JSON.parse(cleanedJson);
-
-    chat.myPhoneRedditFeed = posts;
-    await db.chats.put(chat);
-  } catch (error) {
-    console.error("生成MY Phone Reddit失败:", error);
-    throw error;
-  }
-}
-
-async function handleGenerateMyPhoneBilibili() {
-  if (!activeMyPhoneCharacterId) return;
-  const chat = state.chats[activeMyPhoneCharacterId];
-  if (!chat) return;
-
-  const { proxyUrl, apiKey, model } = state.apiConfig;
-  if (!proxyUrl || !apiKey || !model) {
-    alert('请先在API设置中配置好API信息。');
-    return;
-  }
-
-  const userDisplayNameForAI = (state.qzoneSettings.nickname === '{{user}}' || !state.qzoneSettings.nickname) ? '用户' : state.qzoneSettings.nickname;
-  
-  const maxMemory = chat.settings.maxMemory || 10;
-  const recentHistory = chat.history.slice(-maxMemory).map(msg => 
-    `${msg.role === 'user' ? userDisplayNameForAI : chat.name}: ${String(msg.content).substring(0, 50)}...`
-  ).join('\n');
-  
-  const prompt = `你现在要扮演"${userDisplayNameForAI}"（也就是我），基于我与"${chat.name}"的对话历史，推测我的兴趣爱好，然后生成我可能观看的B站视频。
-
-## 我与"${chat.name}"的最近对话：
-${recentHistory}
-
-## 任务：
-请基于以上对话推测我的特征，然后生成我可能观看的5-8个B站视频。
-
-返回JSON格式：
-[
-  {
-    "title": "视频标题",
-    "author": "UP主名",
-    "views": 播放量,
-    "danmaku": 弹幕数
-  }
-]`;
-
-  try {
-    const messagesForApi = [{ role: 'user', content: prompt }];
-    let isGemini = proxyUrl.includes('generativelanguage');
-    let geminiConfig = toGeminiRequestData(model, apiKey, '', messagesForApi);
-
-    const response = isGemini ?
-      await fetch(geminiConfig.url, geminiConfig.data) :
-      await fetch(`${proxyUrl}/v1/chat/completions`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`
-        },
-        body: JSON.stringify({
-          model: model,
-          messages: messagesForApi,
-          temperature: 0.8
-        })
-      });
-
-    if (!response.ok) throw new Error(`API 错误: ${response.statusText}`);
-
-    const data = await response.json();
-    const aiResponseContent = getGeminiResponseText(data);
-    const cleanedJson = aiResponseContent.replace(/^```json\s*/, '').replace(/```$/, '').trim();
-    const videos = JSON.parse(cleanedJson);
-
-    chat.myPhoneBilibiliVideos = videos;
-    await db.chats.put(chat);
-  } catch (error) {
-    console.error("生成MY Phone B站视频失败:", error);
-    throw error;
-  }
-}
-
   function renderCharMusicScreen() {
     const listEl = document.getElementById('char-music-list');
     listEl.innerHTML = '';
@@ -40228,6 +40164,7 @@ ${charactersContext}
                 // 应用设置
                 applyGlobalWallpaper();
                 applyCPhoneWallpaper();
+                applyMyPhoneWallpaper();
                 applyAppIcons();
                 applyCPhoneAppIcons();
                 applyMyPhoneAppIconsGlobal();
@@ -48986,68 +48923,6 @@ function playMyPhoneSong(songIndex, playlist) {
   }, 100);
 }
 
-function renderMyPhoneRedditList(posts) {
-  const listEl = document.getElementById('myphone-reddit-list');
-  listEl.innerHTML = '';
-
-  if (!posts || posts.length === 0) {
-    listEl.innerHTML = '<p style="text-align:center; color: var(--text-secondary); padding: 50px 0;">暂无内容</p>';
-    return;
-  }
-
-  posts.forEach(post => {
-    const item = document.createElement('div');
-    item.className = 'char-reddit-item';
-    item.innerHTML = `
-      <div class="reddit-title">${post.title}</div>
-      <div class="reddit-subreddit">r/${post.subreddit || 'unknown'}</div>
-      <div class="reddit-meta">${post.author || 'anonymous'} · ${post.score || 0} upvotes</div>
-    `;
-    listEl.appendChild(item);
-  });
-}
-
-function handleMyPhoneRedditSearch(query) {
-  // Placeholder for Reddit search functionality
-  console.log('MY Phone Reddit search:', query);
-}
-
-function renderMyPhoneBilibiliScreen() {
-  const listEl = document.getElementById('myphone-bilibili-list');
-  listEl.innerHTML = '';
-  if (!activeMyPhoneCharacterId) return;
-
-  const char = state.chats[activeMyPhoneCharacterId];
-  const videos = char.myPhoneBilibiliVideos || [];
-
-  if (videos.length === 0) {
-    listEl.innerHTML = '<p style="text-align:center; color: var(--text-secondary); padding: 50px 0;">我的B站空空如也，<br>点击右上角刷新按钮生成一些视频吧！</p>';
-    return;
-  }
-
-  videos.forEach(video => {
-    const item = document.createElement('div');
-    item.className = 'char-bilibili-item';
-    item.innerHTML = `
-      <div class="bilibili-title">${video.title}</div>
-      <div class="bilibili-author">${video.author || 'UP主'}</div>
-      <div class="bilibili-stats">${video.views || 0}播放 · ${video.danmaku || 0}弹幕</div>
-    `;
-    listEl.appendChild(item);
-  });
-}
-
-function closeMyPhoneBilibiliPlayer() {
-  const videoEl = document.getElementById('myphone-bilibili-video');
-  if(videoEl) {
-    videoEl.pause();
-    videoEl.src = '';
-  }
-  switchToMyPhoneScreen('myphone-bilibili-screen');
-}
-
-window.closeMyPhoneBilibiliPlayer = closeMyPhoneBilibiliPlayer;
-
 // MY Phone 手动添加功能函数
 async function saveMyPhoneAlbum() {
   const description = document.getElementById('myphone-album-description-input')?.value?.trim();
@@ -54736,6 +54611,7 @@ async function handleEmergencyAppearanceReset() {
         
         applyGlobalWallpaper();
         applyCPhoneWallpaper();
+        applyMyPhoneWallpaper();
         
         applyGlobalCss(''); // 立即移除 CSS 样式
         applyCustomFont(''); // 移除字体
@@ -54766,7 +54642,7 @@ async function handleFactoryReset() {
     // --- 防误触机制 第1层：弹窗警告 ---
     const confirmed = await showCustomConfirm(
         "☠️ 严重警告：初始化应用",
-        "此操作将【永久删除】本地存储的所有数据，包括：\n\n❌ 所有聊天记录和设定\n❌ 所有图片、表情包、预设\n❌ 所有API配置和外观设置\n\n应用将变回刚安装时的样子。数据一旦删除无法恢复！\n\n确定要继续吗？", 
+        "此操作将【永久删除】本地存储的所有数据，包括：\n\n❌ 所有聊天记录和设定\n❌ 所有图片、表情包、预设\n❌ 所有API配置和外观设置\n❌ 所有联机数据（好友、服务器、头像）\n\n应用将变回刚安装时的样子。数据一旦删除无法恢复！\n\n确定要继续吗？", 
         { 
             confirmButtonClass: 'btn-danger', 
             confirmText: '我明白，继续' 
@@ -54794,6 +54670,32 @@ async function handleFactoryReset() {
     await showCustomAlert("正在重置...", "正在销毁所有数据，应用即将重启...");
 
     try {
+        // 0. 断开联机连接（如果存在）
+        if (typeof onlineChatManager !== 'undefined' && onlineChatManager) {
+            console.log('正在断开联机连接...');
+            // 禁止自动重连
+            onlineChatManager.shouldAutoReconnect = false;
+            
+            // 断开WebSocket连接
+            if (onlineChatManager.isConnected && onlineChatManager.ws) {
+                onlineChatManager.ws.close();
+                onlineChatManager.ws = null;
+                onlineChatManager.isConnected = false;
+            }
+            
+            // 清除定时器
+            if (onlineChatManager.reconnectTimer) {
+                clearTimeout(onlineChatManager.reconnectTimer);
+                onlineChatManager.reconnectTimer = null;
+            }
+            if (onlineChatManager.heartbeatTimer) {
+                clearInterval(onlineChatManager.heartbeatTimer);
+                onlineChatManager.heartbeatTimer = null;
+            }
+            
+            console.log('联机连接已断开');
+        }
+
         // 1. 清空 IndexedDB 所有表
         // 我们不使用 db.delete() 是为了避免重连数据库的复杂性，直接清空表内容效果一样且更稳
         await db.transaction('rw', db.tables, async () => {
@@ -54803,7 +54705,7 @@ async function handleFactoryReset() {
             }
         });
 
-        // 2. 清空 LocalStorage (包括主题、语言、未读计数、临时缓存等)
+        // 2. 清空 LocalStorage (包括主题、语言、未读计数、临时缓存等，也包括联机设置)
         localStorage.clear();
 
         // 3. 强制刷新页面
@@ -56498,6 +56400,7 @@ ${recentHistoryWithUser}
 
       applyGlobalWallpaper();
       applyCPhoneWallpaper();
+      applyMyPhoneWallpaper();
       newWallpaperBase64 = null;
 
       applyAppIcons();
@@ -56752,6 +56655,148 @@ ${recentHistoryWithUser}
         document.getElementById('secondary-model-input').value = selectedModel;
       }
     });
+
+    // ========== 移动端控制台功能 ==========
+    (function() {
+      const consoleLogs = [];
+      let currentFilter = 'all';
+
+      // 保存原始console方法
+      const originalConsole = {
+        log: console.log,
+        warn: console.warn,
+        error: console.error,
+        info: console.info
+      };
+
+      // 添加日志到数组
+      function addLog(type, args) {
+        const timestamp = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+        const message = Array.from(args).map(arg => {
+          if (typeof arg === 'object') {
+            try {
+              return JSON.stringify(arg, null, 2);
+            } catch (e) {
+              return String(arg);
+            }
+          }
+          return String(arg);
+        }).join(' ');
+
+        consoleLogs.push({ type, timestamp, message });
+        
+        // 限制日志数量，最多保存1000条
+        if (consoleLogs.length > 1000) {
+          consoleLogs.shift();
+        }
+      }
+
+      // 重写console方法
+      console.log = function(...args) {
+        originalConsole.log.apply(console, args);
+        addLog('log', args);
+      };
+
+      console.warn = function(...args) {
+        originalConsole.warn.apply(console, args);
+        addLog('warn', args);
+      };
+
+      console.error = function(...args) {
+        originalConsole.error.apply(console, args);
+        addLog('error', args);
+      };
+
+      console.info = function(...args) {
+        originalConsole.info.apply(console, args);
+        addLog('info', args);
+      };
+
+      // 捕获未处理的错误
+      window.addEventListener('error', (event) => {
+        const message = `${event.message}\n  at ${event.filename}:${event.lineno}:${event.colno}`;
+        addLog('error', [message]);
+      });
+
+      // 捕获未处理的Promise拒绝
+      window.addEventListener('unhandledrejection', (event) => {
+        const message = `Unhandled Promise Rejection: ${event.reason}`;
+        addLog('error', [message]);
+      });
+
+      // 渲染控制台内容
+      function renderConsole() {
+        const content = document.getElementById('mobile-console-content');
+        if (!content) return;
+
+        const filteredLogs = currentFilter === 'all' 
+          ? consoleLogs 
+          : consoleLogs.filter(log => log.type === currentFilter);
+
+        if (filteredLogs.length === 0) {
+          content.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--text-secondary);">暂无日志</div>';
+          return;
+        }
+
+        content.innerHTML = filteredLogs.map(log => 
+          `<div class="console-entry ${log.type}">
+            <span class="console-timestamp">[${log.timestamp}]</span>
+            <span class="console-message">${log.message}</span>
+          </div>`
+        ).join('');
+
+        // 自动滚动到底部
+        content.scrollTop = content.scrollHeight;
+      }
+
+      // 打开控制台按钮
+      const openConsoleBtn = document.getElementById('open-console-btn');
+      if (openConsoleBtn) {
+        openConsoleBtn.addEventListener('click', () => {
+          const consolePanel = document.getElementById('mobile-console');
+          if (consolePanel) {
+            consolePanel.style.display = 'flex';
+            renderConsole();
+          }
+        });
+      }
+
+      // 关闭控制台按钮
+      const closeConsoleBtn = document.getElementById('console-close-btn');
+      if (closeConsoleBtn) {
+        closeConsoleBtn.addEventListener('click', () => {
+          const consolePanel = document.getElementById('mobile-console');
+          if (consolePanel) {
+            consolePanel.style.display = 'none';
+          }
+        });
+      }
+
+      // 清空控制台按钮
+      const clearConsoleBtn = document.getElementById('console-clear-btn');
+      if (clearConsoleBtn) {
+        clearConsoleBtn.addEventListener('click', () => {
+          consoleLogs.length = 0;
+          renderConsole();
+        });
+      }
+
+      // 控制台标签切换
+      const consoleTabs = document.querySelectorAll('.console-tab');
+      consoleTabs.forEach(tab => {
+        tab.addEventListener('click', () => {
+          consoleTabs.forEach(t => t.classList.remove('active'));
+          tab.classList.add('active');
+          currentFilter = tab.dataset.tab;
+          renderConsole();
+        });
+      });
+
+      // 添加初始欢迎日志
+      console.log('移动端控制台已启动');
+      console.info('可在API设置中打开控制台查看日志');
+    })();
+    // ========== 移动端控制台功能结束 ==========
 
     document.getElementById('add-world-book-btn').addEventListener('click', async () => {
       const name = await showCustomPrompt('创建世界书', '请输入书名');
@@ -57891,6 +57936,9 @@ if (isGroup) {
             // 聊天记录
             history: JSON.parse(JSON.stringify(chat.history)),
             
+            // 长期记忆（总结的记忆）
+            longTermMemory: chat.longTermMemory ? JSON.parse(JSON.stringify(chat.longTermMemory)) : [],
+            
             // 人设和头像
             settings: {
               aiPersona: chat.settings.aiPersona,
@@ -58032,6 +58080,9 @@ if (isGroup) {
         // 恢复聊天记录
         chat.history = JSON.parse(JSON.stringify(archive.data.history));
         
+        // 恢复长期记忆（总结的记忆）
+        chat.longTermMemory = archive.data.longTermMemory ? JSON.parse(JSON.stringify(archive.data.longTermMemory)) : [];
+        
         // 恢复所有设置
         const savedSettings = archive.data.settings;
         chat.settings.aiPersona = savedSettings.aiPersona;
@@ -58139,6 +58190,160 @@ if (isGroup) {
       
       renderApiHistoryList();
       document.getElementById('api-history-modal').classList.add('visible');
+    });
+    
+    // 一键回到第一条消息
+    document.getElementById('scroll-to-first-message-btn').addEventListener('click', async () => {
+      if (!state.activeChatId) return;
+      const chat = state.chats[state.activeChatId];
+      
+      // 检查消息数量 - 使用 chat.history 而不是 chat.messages
+      const messageCount = chat.history ? chat.history.length : 0;
+      
+      if (messageCount === 0) {
+        await showCustomAlert('提示', '当前聊天没有消息记录。');
+        return;
+      }
+      
+      // 如果消息数量超过阈值，显示警告
+      const MESSAGE_WARNING_THRESHOLD = 500;
+      
+      if (messageCount > MESSAGE_WARNING_THRESHOLD) {
+        const confirmed = await showCustomConfirm(
+          '性能提示',
+          `当前聊天共有 ${messageCount} 条消息。\n\n滚动到第一条消息可能需要一些时间，并可能出现短暂卡顿。\n\n是否继续？`,
+          { 
+            confirmText: '继续', 
+            cancelText: '取消',
+            confirmButtonClass: 'btn-primary'
+          }
+        );
+        
+        if (!confirmed) return;
+      }
+      
+      // 关闭聊天详情页面，返回聊天界面
+      showScreen('chat-interface-screen');
+      
+      // 等待界面渲染完成
+      await new Promise(resolve => setTimeout(resolve, 150));
+      
+      // 获取消息容器
+      const messagesContainer = document.getElementById('chat-messages');
+      if (!messagesContainer) return;
+      
+      // 执行滚动操作
+      requestAnimationFrame(() => {
+        const firstMessage = messagesContainer.querySelector('.message-bubble');
+        
+        if (messageCount > MESSAGE_WARNING_THRESHOLD) {
+          // 消息数量很多时，使用instant模式直接跳转，避免卡顿
+          if (firstMessage) {
+            firstMessage.scrollIntoView({ 
+              behavior: 'instant', 
+              block: 'start' 
+            });
+          } else {
+            messagesContainer.scrollTop = 0;
+          }
+          
+          // 跳转完成后，显示成功提示
+          setTimeout(() => {
+            showCustomAlert('跳转完成', `已跳转到第一条消息。\n\n当前共有 ${messageCount} 条消息记录。`);
+          }, 100);
+        } else {
+          // 消息数量适中时，使用平滑滚动
+          if (firstMessage) {
+            firstMessage.scrollIntoView({ 
+              behavior: 'smooth', 
+              block: 'start' 
+            });
+          } else {
+            messagesContainer.scrollTo({
+              top: 0,
+              behavior: 'smooth'
+            });
+          }
+        }
+      });
+    });
+    
+    // 一键回到最后一条消息
+    document.getElementById('scroll-to-last-message-btn').addEventListener('click', async () => {
+      if (!state.activeChatId) return;
+      const chat = state.chats[state.activeChatId];
+      
+      // 检查消息数量
+      const messageCount = chat.history ? chat.history.length : 0;
+      
+      if (messageCount === 0) {
+        await showCustomAlert('提示', '当前聊天没有消息记录。');
+        return;
+      }
+      
+      // 如果消息数量超过阈值，显示警告
+      const MESSAGE_WARNING_THRESHOLD = 500;
+      
+      if (messageCount > MESSAGE_WARNING_THRESHOLD) {
+        const confirmed = await showCustomConfirm(
+          '性能提示',
+          `当前聊天共有 ${messageCount} 条消息。\n\n滚动到最后一条消息可能需要一些时间，并可能出现短暂卡顿。\n\n是否继续？`,
+          { 
+            confirmText: '继续', 
+            cancelText: '取消',
+            confirmButtonClass: 'btn-primary'
+          }
+        );
+        
+        if (!confirmed) return;
+      }
+      
+      // 关闭聊天详情页面，返回聊天界面
+      showScreen('chat-interface-screen');
+      
+      // 等待界面渲染完成
+      await new Promise(resolve => setTimeout(resolve, 150));
+      
+      // 获取消息容器
+      const messagesContainer = document.getElementById('chat-messages');
+      if (!messagesContainer) return;
+      
+      // 执行滚动操作
+      requestAnimationFrame(() => {
+        // 获取所有消息气泡
+        const allMessages = messagesContainer.querySelectorAll('.message-bubble');
+        const lastMessage = allMessages[allMessages.length - 1];
+        
+        if (messageCount > MESSAGE_WARNING_THRESHOLD) {
+          // 消息数量很多时，使用instant模式直接跳转，避免卡顿
+          if (lastMessage) {
+            lastMessage.scrollIntoView({ 
+              behavior: 'instant', 
+              block: 'end' 
+            });
+          } else {
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+          }
+          
+          // 跳转完成后，显示成功提示
+          setTimeout(() => {
+            showCustomAlert('跳转完成', `已跳转到最后一条消息。\n\n当前共有 ${messageCount} 条消息记录。`);
+          }, 100);
+        } else {
+          // 消息数量适中时，使用平滑滚动
+          if (lastMessage) {
+            lastMessage.scrollIntoView({ 
+              behavior: 'smooth', 
+              block: 'end' 
+            });
+          } else {
+            messagesContainer.scrollTo({
+              top: messagesContainer.scrollHeight,
+              behavior: 'smooth'
+            });
+          }
+        }
+      });
     });
     
     // 关闭API历史查看器
@@ -61900,6 +62105,19 @@ if (isGroup) {
     });
 
 
+    document.getElementById('upload-myphone-bg-url-btn').addEventListener('click', async () => {
+      const url = await showCustomPrompt("网络图片 (MYphone)", "请输入MYphone的背景图片URL", "", "url");
+      if (url && url.trim()) {
+
+        state.globalSettings.myphoneWallpaper = url.trim();
+
+        renderWallpaperScreen();
+      } else if (url !== null) {
+        alert("请输入有效的URL。");
+      }
+    });
+
+
 
     document.getElementById('remove-ephone-bg-btn').addEventListener('click', () => {
 
@@ -62563,6 +62781,33 @@ if (isGroup) {
                 db.globalSettings,
                 'main',
                 'cphoneWallpaper',
+                dataUrl
+            );
+        })();
+      }
+      event.target.value = null; // 清空 input
+    });
+
+    document.getElementById('myphone-wallpaper-upload-input').addEventListener('change', async (event) => {
+      const file = event.target.files[0];
+      if (file) {
+        const dataUrl = await new Promise((res) => {
+          const reader = new FileReader();
+          reader.onload = () => res(reader.result);
+          reader.readAsDataURL(file);
+        });
+
+        // 1. 立即保存和显示
+        state.globalSettings.myphoneWallpaper = dataUrl;
+        renderWallpaperScreen(); // This will update the preview
+        await showCustomAlert("成功", "MYphone 壁纸已更新！\n\n图片将在后台静默上传到图床... (保存设置后生效)");
+
+        // 2. 启动静默上传
+        (async () => {
+            await silentlyUpdateDbUrl(
+                db.globalSettings,
+                'main',
+                'myphoneWallpaper',
                 dataUrl
             );
         })();
